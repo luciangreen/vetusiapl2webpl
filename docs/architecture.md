@@ -8,12 +8,13 @@ It reads a *terminal* Prolog program that interacts with the user via
 an SWI-Prolog HTTP server, replacing each `read_string` interaction with an
 HTML form round-trip.
 
-The compiler is organised into two stages:
+The compiler is organised into three stages:
 
 | Stage | Module | Responsibility |
 |-------|--------|----------------|
 | **Stage 2** | `src/reader.pl` | Read the source file; normalise every clause into a tagged internal representation |
-| **Stage 3+** | `src/vetusiapl2webpl.pl` | Transform the normalised representation into an HTTP server program |
+| **Stage 3** | `src/checkpoint_detector.pl` | Detect web conversion points (checkpoints) — one per input goal — and capture the surrounding metadata needed by the code generator |
+| **Stage 4+** | `src/vetusiapl2webpl.pl` | Transform the normalised representation into an HTTP server program |
 
 ---
 
@@ -78,7 +79,79 @@ preserved inside each `norm_clause` for use by later stages.
 
 ---
 
-## Pipeline (Stage 3+ — vetusiapl2webpl.pl)
+## Stage 3 — Web Conversion Point Detector (`src/checkpoint_detector.pl`)
+
+### Purpose
+
+Stage 3 analyses a normalised clause body and identifies every *input goal*
+(`norm_read_string` or `norm_read_password`) as a **checkpoint** — a point
+where the terminal program pauses for user input and the web converter must
+insert an HTML form page boundary.
+
+For each checkpoint the module captures all metadata required by the code
+generator:
+
+* **unique ID** — positive integer assigned in left-to-right, depth-first order
+* **kind** — `read_string` or `read_password`
+* **variable name** — the atom from the `VarNames` list (or `anon`)
+* **prompts** — `norm_output/1` goals accumulated since the previous checkpoint
+  (shown as HTML content on the form page)
+* **continuation** — the normalised body that executes *after* this checkpoint
+* **live variables** — names of variables bound by previous reads that appear
+  free in the continuation (must be threaded forward as hidden form fields)
+* **context** — the surrounding control-flow structure
+
+### Checkpoint term structure
+
+```prolog
+checkpoint(Id, Kind, VarName, Prompts, Continuation, LiveVars, Context)
+```
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `Id` | positive integer | Unique identifier, assigned left-to-right depth-first (1, 2, …) |
+| `Kind` | `read_string` \| `read_password` | Source of the user input |
+| `VarName` | atom \| `anon` | Name of the receiving variable |
+| `Prompts` | `list(norm_output/1)` | Output goals displayed before the input on this form page |
+| `Continuation` | `NormBody` | Normalised body executed after this checkpoint |
+| `LiveVars` | `list(atom)` | Variable names from `VarNames` that were bound by earlier reads and appear free in `Continuation` |
+| `Context` | atom \| compound | Surrounding control flow (see below) |
+
+### Context values
+
+| Value | Meaning |
+|-------|---------|
+| `sequential` | Plain straight-line conjunction |
+| `menu` | Inside an arm of a disjunction `(A ; B)` |
+| `branch` | Inside the `Then` or `Else` arm of an if-then(-else) |
+| `loop(F/A)` | Inside a branch of a construct where another arm contains a recursive call to predicate `F/A` (requires the optional `ClauseHead` argument of `detect_checkpoints/4`) |
+
+### Public API
+
+```prolog
+detect_checkpoints(+NormBody, +VarNames, -Checkpoints)
+    % Detect all checkpoints in NormBody (no loop detection).
+
+detect_checkpoints(+NormBody, +VarNames, +ClauseHead, -Checkpoints)
+    % Like above; ClauseHead = F/A enables loop(F/A) context detection.
+
+collect_live_vars(+Term, +VarNames, -LiveVarNames)
+    % Utility: find all named vars from VarNames that appear free in Term.
+```
+
+### Detection coverage
+
+* **`norm_read_string/5`** — detected as `Kind = read_string`
+* **`norm_read_password/1-2`** — detected as `Kind = read_password`
+* **`norm_disj/2`** — arms get `menu` context
+* **`norm_if_then/2`** — Then arm gets `branch` context
+* **`norm_if_then_else/3`** — Then and Else arms get `branch` context
+* **Recursive calls** — any of the above become `loop(F/A)` when another arm
+  contains `norm_goal(Call)` with `functor(Call, F, A)` matching `ClauseHead`
+
+---
+
+## Pipeline (Stage 4+ — vetusiapl2webpl.pl)
 
 ```
 Input .pl file
@@ -213,17 +286,19 @@ step_N(Request) :-      % final step
 ```
 vetusiapl2webpl/
 ├── src/
-│   ├── reader.pl            ← Stage 2: source reader and normaliser
-│   └── vetusiapl2webpl.pl   ← Stage 3+: converter module (entry point: convert/2)
+│   ├── reader.pl                ← Stage 2: source reader and normaliser
+│   ├── checkpoint_detector.pl   ← Stage 3: web conversion point detector
+│   └── vetusiapl2webpl.pl       ← Stage 4+: converter module (entry point: convert/2)
 ├── examples/
-│   ├── input_example.pl     ← sample terminal Prolog input
-│   └── output_example.pl    ← reference web Prolog output
+│   ├── input_example.pl         ← sample terminal Prolog input
+│   └── output_example.pl        ← reference web Prolog output
 ├── tests/
-│   ├── test_reader.pl       ← Stage 2 plunit test suite
-│   └── test_vetusiapl2webpl.pl  ← Stage 3+ plunit test suite
+│   ├── test_reader.pl           ← Stage 2 plunit test suite
+│   ├── test_checkpoint_detector.pl ← Stage 3 plunit test suite
+│   └── test_vetusiapl2webpl.pl  ← Stage 4+ plunit test suite
 ├── docs/
-│   └── architecture.md      ← this document
-├── output/                  ← default directory for generated files
+│   └── architecture.md          ← this document
+├── output/                      ← default directory for generated files
 ├── README.md
 └── LICENSE
 ```
@@ -245,5 +320,7 @@ and can be called from any handler step.
 
 ### Supporting `read_term` and other input predicates
 
-Extend `split_at_reads_/4` to recognise additional input predicates
-(e.g. `read_term/2`, `read/1`) alongside `read_string/5`.
+Extend `is_input_goal/3` in `src/checkpoint_detector.pl` (Stage 3) and
+`split_at_reads_/4` in `src/vetusiapl2webpl.pl` (Stage 4+) to recognise
+additional input predicates (e.g. `read_term/2`, `read/1`) alongside
+`read_string/5`.
