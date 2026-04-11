@@ -1,0 +1,12 @@
+# Generated output files (produced by the converter at runtime)
+output/*.pl
+
+# SWI-Prolog generated files
+*.qlf
+
+# macOS
+.DS_Store
+
+# Editor swap files
+*.swp
+*~
