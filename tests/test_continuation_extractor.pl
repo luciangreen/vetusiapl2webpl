@@ -322,7 +322,7 @@ menu_two_branch_cps(CPs, VN) :-
         ], Body),
     detect_checkpoints(Body, VN, CPs).
 
-test(menu_two_branch_five_checkpoints) :-
+test(menu_two_branch_three_checkpoints) :-
     menu_two_branch_cps(CPs, _VN),
     length(CPs, 3).
 

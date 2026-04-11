@@ -452,8 +452,12 @@ response_to_goal(cond_resp(CondGoals, ThenResp, ElseResp), ReqVar, VN, Goal) :-
     ;   Goal = (Cond -> ThenGoal ; ElseGoal)
     ).
 
-response_to_goal(retry_resp(_TargetStep), ReqVar, _VN, Goal) :-
-    Goal = http_redirect(see_other, root(.), ReqVar).
+response_to_goal(retry_resp(TargetStep), ReqVar, _VN, Goal) :-
+    ( TargetStep = step_0 ->
+        Goal = http_redirect(see_other, root(.), ReqVar)
+    ;   atom_concat('/', TargetStep, Path),
+        Goal = http_redirect(see_other, root(Path), ReqVar)
+    ).
 
 % ==========================================================================
 % Internal: HTML / output helpers
@@ -468,13 +472,15 @@ make_hidden_input_term(VN, VarName, input([type=hidden, name=VarName, value=Var]
 %% norm_output_to_html_term(+NormOutput, -HtmlTerm) is det.
 %
 %  Convert a norm_output/1 goal to an HTML term for reply_html_page/2.
+%  The \(Goal) term invokes Goal via SWI-Prolog's html_write DCG at
+%  rendering time, which is correct for dynamically computed content.
 norm_output_to_html_term(norm_output(writeln(X)), p(X))                    :- !.
 norm_output_to_html_term(norm_output(write(X)),   span(X))                  :- !.
 norm_output_to_html_term(norm_output(nl),          br([]))                  :- !.
 norm_output_to_html_term(norm_output(print(X)),    p(X))                    :- !.
 norm_output_to_html_term(norm_output(format(Fmt, Args)),
-                         p(runtime_format(Fmt, Args)))                      :- !.
-norm_output_to_html_term(norm_output(format(Fmt)), p(Fmt))                  :- !.
+                         \(format(Fmt, Args)))                              :- !.
+norm_output_to_html_term(norm_output(format(Fmt)), \(format(Fmt)))          :- !.
 norm_output_to_html_term(_,                        p(''))                   .
 
 %% norm_to_result_call(+NormGoal, -Call) is det.
