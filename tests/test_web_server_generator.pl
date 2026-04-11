@@ -44,19 +44,6 @@ read_all_lines(S, Lines) :-
         read_all_lines(S, Rest)
     ).
 
-%% run_generate_and_check(+InputFile, +TmpFile, +Port, :Checks)
-%  Generate the web server to TmpFile, then run Checks (a goal) on the
-%  output lines.  Cleans up TmpFile afterwards.
-run_generate_and_check(InputFile, TmpFile, Port, Checks) :-
-    ( Port =:= 8080 ->
-        generate_web_server(InputFile, TmpFile)
-    ;   generate_web_server(InputFile, TmpFile, Port)
-    ),
-    open(TmpFile, read, S),
-    read_all_lines(S, Lines),
-    close(S),
-    call(Checks, Lines).
-
 % ==========================================================================
 % Tests: wsg_find_main/4
 % ==========================================================================
