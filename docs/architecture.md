@@ -8,9 +8,77 @@ It reads a *terminal* Prolog program that interacts with the user via
 an SWI-Prolog HTTP server, replacing each `read_string` interaction with an
 HTML form round-trip.
 
+The compiler is organised into two stages:
+
+| Stage | Module | Responsibility |
+|-------|--------|----------------|
+| **Stage 2** | `src/reader.pl` | Read the source file; normalise every clause into a tagged internal representation |
+| **Stage 3+** | `src/vetusiapl2webpl.pl` | Transform the normalised representation into an HTTP server program |
+
 ---
 
-## Pipeline
+## Stage 2 — Input Program Reader and Normaliser (`src/reader.pl`)
+
+### Purpose
+
+Stage 2 loads the source program from disk and converts it into a
+traversable data structure without performing any semantic reinterpretation.
+The result is a list of *normalised clause* terms.
+
+### Normalised clause forms
+
+| Term | Meaning |
+|------|---------|
+| `norm_clause(Head, NormBody, VarNames)` | A regular clause (rule or fact).  For a fact `NormBody = norm_true`. |
+| `directive(Goal)` | A top-level directive (`:- Goal`). |
+
+### Normalised body forms (`NormBody`)
+
+| Term | Source construct |
+|------|-----------------|
+| `norm_true` | `true` or empty body |
+| `norm_cut` | `!` |
+| `norm_conj(A, B)` | conjunction `(A , B)` |
+| `norm_disj(A, B)` | disjunction `(A ; B)` |
+| `norm_if_then(Cond, Then)` | soft-cut `(Cond -> Then)` |
+| `norm_if_then_else(Cond, Then, Else)` | if-then-else `(Cond -> Then ; Else)` |
+| `norm_read_string(S, Sents, Pad, Len, Var)` | `read_string/5` |
+| `norm_read_password(Prompt, Var)` | `read_password/2` |
+| `norm_read_password(Var)` | `read_password/1` |
+| `norm_output(Goal)` | any recognised terminal-output predicate |
+| `norm_goal(Goal)` | any other goal |
+
+### Public API
+
+```prolog
+read_and_normalise(+File, -NormClauses)   % read file → normalised list
+normalise_clause(+Term, +VarNames, -Norm) % normalise one raw term
+normalise_body(+Body, -NormBody)          % normalise one clause body
+is_output_goal(+Goal)                     % recognise output predicates
+```
+
+### Detection coverage
+
+Stage 2 detects and tags:
+
+- **predicates / clauses** — every term is wrapped in `norm_clause/3` or
+  `directive/1`
+- **conjunctions** — `norm_conj/2`
+- **disjunctions** — `norm_disj/2`
+- **if-then-else** — `norm_if_then_else/3` (checked before bare disjunction)
+- **if-then** — `norm_if_then/2`
+- **cuts** — `norm_cut`
+- **`read_string/5`** — `norm_read_string/5`
+- **`read_password/1-2`** — `norm_read_password/1-2`
+- **terminal output** — `norm_output/1` (covers `write/1`, `writeln/1`,
+  `nl`, `format/1-2`, `writef/2`, `print/1`)
+
+Variable names (the `Name = Var` association list from `read_term/3`) are
+preserved inside each `norm_clause` for use by later stages.
+
+---
+
+## Pipeline (Stage 3+ — vetusiapl2webpl.pl)
 
 ```
 Input .pl file
@@ -145,12 +213,14 @@ step_N(Request) :-      % final step
 ```
 vetusiapl2webpl/
 ├── src/
-│   └── vetusiapl2webpl.pl   ← converter module (this codebase)
+│   ├── reader.pl            ← Stage 2: source reader and normaliser
+│   └── vetusiapl2webpl.pl   ← Stage 3+: converter module (entry point: convert/2)
 ├── examples/
 │   ├── input_example.pl     ← sample terminal Prolog input
 │   └── output_example.pl    ← reference web Prolog output
 ├── tests/
-│   └── test_vetusiapl2webpl.pl  ← plunit test suite
+│   ├── test_reader.pl       ← Stage 2 plunit test suite
+│   └── test_vetusiapl2webpl.pl  ← Stage 3+ plunit test suite
 ├── docs/
 │   └── architecture.md      ← this document
 ├── output/                  ← default directory for generated files
