@@ -598,4 +598,4 @@ test(second_checkpoint_continuation_is_nontrivial) :-
 input_example_file(File) :-
     cp_test_dir(Dir),
     file_directory_name(Dir, RepoRoot),
-    atomic_list_concat([RepoRoot, '/examples/input_example.pl'], File).
+    atomic_list_concat([RepoRoot, examples, 'input_example.pl'], '/', File).

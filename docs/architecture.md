@@ -124,7 +124,7 @@ checkpoint(Id, Kind, VarName, Prompts, Continuation, LiveVars, Context)
 | `sequential` | Plain straight-line conjunction |
 | `menu` | Inside an arm of a disjunction `(A ; B)` |
 | `branch` | Inside the `Then` or `Else` arm of an if-then(-else) |
-| `loop(F/A)` | Inside a branch of a construct where another arm contains a recursive call to predicate `F/A` (requires the optional `ClauseHead` argument of `detect_checkpoints/4`) |
+| `loop(F/A)` | Inside a branching construct (disjunction or if-then-else) where at least one arm contains a recursive call to predicate `F/A` (requires the optional `ClauseHead` argument to `detect_checkpoints/4`) |
 
 ### Public API
 
