@@ -305,8 +305,8 @@ test(form_child_order_hidden_then_prompts_then_input_then_submit) :-
 
 :- begin_tests(form_resp_inputkind).
 
-%% Helper — build a body with read_string only.
-two_read_string_body_cps(CPs, VN) :-
+%% Helper — build checkpoints from a body with two read_string goals.
+build_two_read_string_checkpoints(CPs, VN) :-
     V1 = _, V2 = _,
     VN = ['Name' = V1, 'Age' = V2],
     Body = norm_conj(
@@ -318,44 +318,44 @@ two_read_string_body_cps(CPs, VN) :-
     ),
     detect_checkpoints(Body, VN, CPs).
 
-%% Helper — build a body with read_password.
-one_read_password_cps(CPs, VN) :-
+%% Helper — build checkpoints from a body with a read_password goal.
+build_read_password_checkpoint(CPs, VN) :-
     V = _,
     VN = ['Pass' = V],
     Body = norm_read_password('Enter password:', V),
     detect_checkpoints(Body, VN, CPs).
 
-%% Helper — build a body with a read_string where VarName suggests password.
-password_varname_cps(CPs, VN) :-
+%% Helper — build checkpoints from a body with a read_string where VarName suggests password.
+build_password_varname_checkpoint(CPs, VN) :-
     V = _,
     VN = ['Password' = V],
     Body = norm_read_string(user, "\n", "\r", _, V),
     detect_checkpoints(Body, VN, CPs).
 
-%% Helper — build a body with a read_string where VarName suggests textarea.
-textarea_varname_cps(CPs, VN) :-
+%% Helper — build checkpoints from a body with a read_string where VarName suggests textarea.
+build_textarea_varname_checkpoint(CPs, VN) :-
     V = _,
     VN = ['Description' = V],
     Body = norm_read_string(user, "\n", "\r", _, V),
     detect_checkpoints(Body, VN, CPs).
 
 test(read_string_gets_text_inputkind) :-
-    two_read_string_body_cps(CPs, VN),
+    build_two_read_string_checkpoints(CPs, VN),
     extract_continuations(CPs, VN, none, [Step0 | _]),
     Step0 = cont_step(step_0, _, _, form_resp(_, 'Name', _, _, text)).
 
 test(read_password_gets_password_inputkind) :-
-    one_read_password_cps(CPs, VN),
+    build_read_password_checkpoint(CPs, VN),
     extract_continuations(CPs, VN, none, [Step0 | _]),
     Step0 = cont_step(step_0, _, _, form_resp(_, 'Pass', _, _, password)).
 
 test(password_varname_gets_password_inputkind) :-
-    password_varname_cps(CPs, VN),
+    build_password_varname_checkpoint(CPs, VN),
     extract_continuations(CPs, VN, none, [Step0 | _]),
     Step0 = cont_step(step_0, _, _, form_resp(_, 'Password', _, _, password)).
 
 test(textarea_varname_gets_textarea_inputkind) :-
-    textarea_varname_cps(CPs, VN),
+    build_textarea_varname_checkpoint(CPs, VN),
     extract_continuations(CPs, VN, none, [Step0 | _]),
     Step0 = cont_step(step_0, _, _, form_resp(_, 'Description', _, _, textarea)).
 
