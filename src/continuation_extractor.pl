@@ -224,10 +224,11 @@ compile_cont_body(norm_true, LiveVars, _ContCPs, _VN, _Head,
 % choice points, so the cut has no observable effect.  Return an empty
 % result page wrapped in a todo_resp so that a TODO comment is emitted in
 % the generated source, alerting the developer that cut semantics differ.
-% Stage 10: approximately preserved — emit TODO marker.
+% Stage 10: approximately preserved — emit TODO marker using the canonical
+% message from control_flow_transformer:cf_issue_message/2.
 compile_cont_body(norm_cut, LiveVars, _ContCPs, _VN, _Head,
-                  todo_resp('Cut (!) in continuation: no choice points exist in HTTP handlers; cut has no observable effect.',
-                            result_resp([], LiveVars))) :- !.
+                  todo_resp(Msg, result_resp([], LiveVars))) :- !,
+    cf_issue_message(issue(cut_sequential, sequential, norm_cut), Msg).
 
 % If-then-else at the top level of the continuation.
 compile_cont_body(norm_if_then_else(Cond, Then, Else), LiveVars, ContCPs, VN, Head,

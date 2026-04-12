@@ -316,7 +316,7 @@ test(dynamic_meta_call_message_is_atom) :-
 test(todo_comment_starts_with_percent_percent_todo) :-
     Issue = issue(cut_sequential, sequential, norm_cut),
     todo_comment(Issue, Comment),
-    sub_atom(Comment, 0, _, _, '%% TODO:').
+    sub_atom(Comment, 0, 9, _, '%% TODO: ').
 
 test(todo_comment_for_cut_in_branch_is_atom) :-
     Issue = issue(cut_in_branch, branch, norm_cut),
