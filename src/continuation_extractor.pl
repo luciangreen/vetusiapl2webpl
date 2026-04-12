@@ -176,9 +176,11 @@ gen_cont_steps([CP | RestCPs], VN, Head, [Step | RestSteps]) :-
     ce_take_n(NCont, RestCPs, ContCPs),
     % Split the continuation body: collect leading compute goals as PreGoals
     % and leave the rest for Response compilation.
-    collect_pre_goals(Continuation, PreGoals, RemBody),
+    collect_pre_goals(Continuation, PreGoals0, RemBody),
     % Compile the remaining body into a Response term.
-    compile_cont_body(RemBody, LiveVars, ContCPs, VN, Head, Response),
+    compile_cont_body(RemBody, LiveVars, ContCPs, VN, Head, Response0),
+    % Move any trailing compute goals that ended up in result_resp into PreGoals.
+    ce_extract_result_compute_goals(Response0, PreGoals0, PreGoals, Response),
     Step = cont_step(StepName, LiveVars, PreGoals, Response),
     gen_cont_steps(RestCPs, VN, Head, RestSteps).
 
@@ -295,9 +297,28 @@ compile_cont_body(NormBody, LiveVars, _ContCPs, _VN, _Head,
                   result_resp(Goals, LiveVars)) :-
     ce_norm_to_goal_list(NormBody, Goals).
 
-% ==========================================================================
-% Internal: body analysis utilities
-% ==========================================================================
+%% ce_extract_result_compute_goals(+Response0, +PreGoals0, -PreGoals, -Response) is det.
+%
+%  If Response0 is a result_resp whose Goals contain compute goals (norm_goal
+%  or norm_cut terms), move those compute goals to the end of PreGoals0 so
+%  that they are executed as Prolog goals rather than being rendered as HTML.
+%  Non-compute goals (norm_output, etc.) remain in the result_resp body.
+%  All other response kinds are passed through unchanged.
+ce_extract_result_compute_goals(result_resp(Goals, LV), PreGoals0, PreGoals,
+                                result_resp(OutGoals, LV)) :- !,
+    include(ce_is_compute_norm_goal, Goals, ComputeGoals),
+    exclude(ce_is_compute_norm_goal, Goals, OutGoals),
+    append(PreGoals0, ComputeGoals, PreGoals).
+ce_extract_result_compute_goals(Response, PreGoals, PreGoals, Response).
+
+%% ce_is_compute_norm_goal(+Goal) is semidet.
+%
+%  True when Goal is a norm_goal/1 or norm_cut — a computation goal that
+%  should be executed as Prolog rather than rendered as HTML output.
+ce_is_compute_norm_goal(norm_goal(_)).
+ce_is_compute_norm_goal(norm_cut).
+
+
 
 %% count_reads_in_body(+NormBody, -N) is det.
 %

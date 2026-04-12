@@ -313,17 +313,17 @@ is_pure_test(callable(_)).
 prolog:message(cf_issue(issue(cut_sequential, Ctx, _))) -->
     { atomic_list_concat(
         ['[vetusiapl2webpl Stage 10] Cut (!) in ', Ctx,
-         ' context: cut has no observable effect in HTTP handlers '
-         '(no choice points exist); semantics preserved trivially.'],
+         ' context: cut has no observable effect in HTTP handlers',
+         ' (no choice points exist); semantics preserved trivially.'],
         Msg) },
     [ Msg ].
 
 prolog:message(cf_issue(issue(cut_in_branch, Ctx, _))) -->
     { atomic_list_concat(
         ['[vetusiapl2webpl Stage 10] Cut (!) inside ', Ctx,
-         ' branch: preserved syntactically. '
-         'Cross-branch escape semantics cannot be fully verified. '
-         'A TODO comment has been added to the generated code.'],
+         ' branch: preserved syntactically.',
+         ' Cross-branch escape semantics cannot be fully verified.',
+         ' A TODO comment has been added to the generated code.'],
         Msg) },
     [ Msg ].
 
@@ -331,8 +331,8 @@ prolog:message(cf_issue(issue(exception_handling, Ctx, Goal))) -->
     { term_to_atom(Goal, GoalAtom),
       atomic_list_concat(
         ['[vetusiapl2webpl Stage 10] Exception handling (', GoalAtom,
-         ') in ', Ctx, ' context: passes through as-is. '
-         'Interaction with the HTTP server is not verified.'],
+         ') in ', Ctx, ' context: passes through as-is.',
+         ' Interaction with the HTTP server is not verified.'],
         Msg) },
     [ Msg ].
 
@@ -340,8 +340,8 @@ prolog:message(cf_issue(issue(negation_as_failure, Ctx, Goal))) -->
     { term_to_atom(Goal, GoalAtom),
       atomic_list_concat(
         ['[vetusiapl2webpl Stage 10] Negation-as-failure (', GoalAtom,
-         ') in ', Ctx, ' context: safe only when the negated goal is a pure test. '
-         'Verify that the goal has no side effects.'],
+         ') in ', Ctx, ' context: safe only when the negated goal is a pure test.',
+         ' Verify that the goal has no side effects.'],
         Msg) },
     [ Msg ].
 
@@ -349,7 +349,7 @@ prolog:message(cf_issue(issue(dynamic_meta_call, Ctx, Goal))) -->
     { term_to_atom(Goal, GoalAtom),
       atomic_list_concat(
         ['[vetusiapl2webpl Stage 10] Dynamic meta-call (', GoalAtom,
-         ') in ', Ctx, ' context: cannot be statically analysed. '
-         'Passes through unchanged.'],
+         ') in ', Ctx, ' context: cannot be statically analysed.',
+         ' Passes through unchanged.'],
         Msg) },
     [ Msg ].
