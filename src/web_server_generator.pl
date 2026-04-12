@@ -58,6 +58,7 @@
 :- use_module(reader).
 :- use_module(checkpoint_detector).
 :- use_module(continuation_extractor).
+:- use_module(html_output).
 
 % ==========================================================================
 % Public API
@@ -116,7 +117,7 @@ wsg_write_program(Out, Steps, VN, AuxNorms, Port) :-
     wsg_emit_handler_decls(Out, Steps),
     nl(Out),
     wsg_emit_server_bootstrap(Out, Port),
-    nl(Out),
+    emit_html_helpers(Out),
     maplist(write_cont_step(Out, VN), Steps),
     wsg_emit_aux_clauses(Out, AuxNorms).
 

@@ -8,13 +8,15 @@ It reads a *terminal* Prolog program that interacts with the user via
 an SWI-Prolog HTTP server, replacing each `read_string` interaction with an
 HTML form round-trip.
 
-The compiler is organised into three stages:
+The compiler is organised into four stages:
 
 | Stage | Module | Responsibility |
 |-------|--------|----------------|
 | **Stage 2** | `src/reader.pl` | Read the source file; normalise every clause into a tagged internal representation |
 | **Stage 3** | `src/checkpoint_detector.pl` | Detect web conversion points (checkpoints) — one per input goal — and capture the surrounding metadata needed by the code generator |
-| **Stage 4+** | `src/vetusiapl2webpl.pl` | Transform the normalised representation into an HTTP server program |
+| **Stage 4** | `src/continuation_extractor.pl` | Extract continuations from checkpoints; generate cont_step/4 terms and emit handler clauses |
+| **Stage 5** | `src/web_server_generator.pl` | Tie together the full pipeline and emit a complete, runnable SWI-Prolog HTTP server program |
+| **Stage 6** | `src/html_output.pl` | Convert terminal-output goals into HTML output calls; provide runtime helper predicates for generated programs |
 
 ---
 
@@ -290,6 +292,7 @@ vetusiapl2webpl/
 │   ├── checkpoint_detector.pl   ← Stage 3: web conversion point detector
 │   ├── continuation_extractor.pl← Stage 4: continuation extraction engine
 │   ├── web_server_generator.pl  ← Stage 5: web server skeleton generator
+│   ├── html_output.pl           ← Stage 6: HTML output conversion helpers
 │   └── vetusiapl2webpl.pl       ← original single-module converter (convert/2)
 ├── examples/
 │   ├── input_example.pl         ← sample terminal Prolog input
@@ -298,7 +301,8 @@ vetusiapl2webpl/
 │   ├── test_reader.pl               ← Stage 2 plunit test suite
 │   ├── test_checkpoint_detector.pl  ← Stage 3 plunit test suite
 │   ├── test_continuation_extractor.pl ← Stage 4 plunit test suite
-│   └── test_web_server_generator.pl ← Stage 5 plunit test suite
+│   ├── test_web_server_generator.pl ← Stage 5 plunit test suite
+│   └── test_html_output.pl          ← Stage 6 plunit test suite
 ├── docs/
 │   └── architecture.md          ← this document
 ├── output/                      ← default directory for generated files
@@ -393,6 +397,88 @@ wsg_write_program/5           (Stage 5)
     ▼
 OutputFile
 ```
+
+---
+
+## Stage 6 — HTML Output Conversion (`src/html_output.pl`)
+
+### Purpose
+
+Stage 6 converts terminal-output goals into HTML output calls and provides
+a library of helper predicates for use in generated web programs.
+
+Two categories of predicates are defined:
+
+1. **Converter-side** helpers (run during code generation by Stages 4–5):
+   - `norm_output_to_html_term/2` — convert a `norm_output/1` goal to an
+     HTML term for use inside `reply_html_page/2` form pages
+   - `norm_output_to_result_call/2` — convert a `norm_output/1` goal to a
+     Prolog call for a raw-format result page
+   - `emit_html_helpers/1` — write runtime helper predicate definitions into
+     an output stream, embedding them in every generated program
+
+2. **Runtime** helpers (embedded in every generated program):
+   - `html_page_header/1` — emit HTTP Content-type header + `<html><head><body>`
+   - `html_page_footer/0` — emit `</body></html>`
+   - `html_writeln/1` — write text as `<p>` paragraph, or pass through HTML
+   - `html_write/1` — write inline text as `<span>`, or pass through HTML
+   - `html_safe_writeln/1` — HTML-escape text, then write as `<p>`
+   - `html_safe_write/1` — HTML-escape text, then write inline
+   - `looks_like_html/1` — detect HTML fragments (atoms containing `<` and `>`)
+   - `html_escape/2` — replace `&`, `<`, `>`, `"` with entity references
+
+### HTML fragment detection
+
+An atom is considered an HTML fragment when it contains both `<` and `>`.
+When a `writeln/write` argument is a ground atom that looks like HTML at
+conversion time, the converter passes it through as-is rather than wrapping
+it in `<p>`/`<span>`.  For runtime variables (unknown at conversion time),
+the runtime helpers `html_writeln/1` and `html_write/1` perform the same
+detection at run time.
+
+### Conversion rules (enhanced by Stage 6)
+
+| Goal (in `norm_output/1`) | Ground HTML atom | Plain text / variable |
+|---------------------------|------------------|-----------------------|
+| `writeln(X)` — form page | `\(format('~w~n',[X]))` (raw pass-through) | `p(X)` |
+| `write(X)` — form page | `\(format('~w',[X]))` | `span(X)` |
+| `writeln(X)` — result page | `format('~w~n',[X])` | `html_writeln(X)` |
+| `write(X)` — result page | `format('~w',[X])` | `html_write(X)` |
+
+Result pages now use `html_page_header('Result')` and `html_page_footer`
+instead of raw `format('Content-type: text/html\n\n')` and
+`format('<html><body>\n')` / `format('</body></html>\n')`.
+
+### Public API
+
+```prolog
+looks_like_html(+Text)                  % detect HTML fragments (semidet)
+html_escape(+In, -Out)                  % HTML-escape special characters
+
+norm_output_to_html_term(+NormOutput, -HtmlTerm)    % converter-side
+norm_output_to_result_call(+NormGoal, -Call)        % converter-side
+emit_html_helpers(+Out:stream)                      % converter-side emitter
+
+html_page_header(+Title)                % runtime: page open
+html_page_footer                        % runtime: page close
+html_writeln(+Text)                     % runtime: paragraph or HTML
+html_write(+Text)                       % runtime: span or HTML
+html_safe_writeln(+Text)                % runtime: escaped paragraph
+html_safe_write(+Text)                  % runtime: escaped inline
+```
+
+### Integration points
+
+Stage 6 is used by both Stage 4 and Stage 5 via `use_module(html_output)`:
+
+- **`continuation_extractor.pl`** (Stage 4): imports
+  `norm_output_to_html_term/2` and `norm_output_to_result_call/2` for form
+  and result page rendering.  `write_cont_steps/3` calls `emit_html_helpers/1`
+  so that generated programs include the runtime helpers.
+
+- **`web_server_generator.pl`** (Stage 5): calls `emit_html_helpers/1` inside
+  `wsg_write_program/5` so that every generated web server program includes
+  the runtime helpers and is self-contained.
 
 ---
 

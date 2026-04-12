@@ -66,6 +66,8 @@
 :- use_module(library(lists)).
 :- use_module(library(apply)).
 
+:- use_module(html_output).
+
 % ==========================================================================
 % Public API
 % ==========================================================================
@@ -110,8 +112,8 @@ extract_continuations(Checkpoints, VN, Head, Steps) :-
 %% write_cont_steps(+Out:stream, +Steps:list, +VarNames:list) is det.
 %
 %  Write the complete generated web program — boilerplate, HTTP handler
-%  declarations, server init, and one handler clause per cont_step —
-%  to the open output stream Out.
+%  declarations, server init, html output helpers, and one handler clause
+%  per cont_step — to the open output stream Out.
 write_cont_steps(Out, Steps, VN) :-
     emit_ce_header_comment(Out),
     emit_ce_use_modules(Out),
@@ -119,7 +121,7 @@ write_cont_steps(Out, Steps, VN) :-
     emit_ce_handler_decls(Out, Steps),
     nl(Out),
     emit_ce_server_init(Out),
-    nl(Out),
+    emit_html_helpers(Out),
     maplist(write_cont_step(Out, VN), Steps).
 
 % ==========================================================================
@@ -423,14 +425,13 @@ response_to_goal(form_resp(Prompts, InputVarName, HiddenVarNames, NextStep),
     Goal      = reply_html_page(title('Form'), [Form]).
 
 response_to_goal(result_resp(Goals, _LiveVars), _ReqVar, _VN, Goal) :-
-    maplist(norm_to_result_call, Goals, Lines),
+    maplist(norm_output_to_result_call, Goals, Lines),
     ce_goals_to_conj(
-        [ format('Content-type: text/html\n\n'),
-          format('<html><body>\n')
+        [ html_page_header('Result')
         | Lines
         ],
         PreGoal),
-    LastGoal = format('</body></html>\n'),
+    LastGoal = html_page_footer,
     ( PreGoal = true ->
         Goal = LastGoal
     ;   Goal = (PreGoal, LastGoal)
@@ -470,32 +471,8 @@ response_to_goal(retry_resp(TargetStep), ReqVar, _VN, Goal) :-
 make_hidden_input_term(VN, VarName, input([type=hidden, name=VarName, value=Var])) :-
     ce_find_var(VarName, VN, Var).
 
-%% norm_output_to_html_term(+NormOutput, -HtmlTerm) is det.
-%
-%  Convert a norm_output/1 goal to an HTML term for reply_html_page/2.
-%  The \(Goal) term invokes Goal via SWI-Prolog's html_write DCG at
-%  rendering time, which is correct for dynamically computed content.
-norm_output_to_html_term(norm_output(writeln(X)), p(X))                    :- !.
-norm_output_to_html_term(norm_output(write(X)),   span(X))                  :- !.
-norm_output_to_html_term(norm_output(nl),          br([]))                  :- !.
-norm_output_to_html_term(norm_output(print(X)),    p(X))                    :- !.
-norm_output_to_html_term(norm_output(format(Fmt, Args)),
-                         \(format(Fmt, Args)))                              :- !.
-norm_output_to_html_term(norm_output(format(Fmt)), \(format(Fmt)))          :- !.
-norm_output_to_html_term(_,                        p(''))                   .
-
-%% norm_to_result_call(+NormGoal, -Call) is det.
-%
-%  Convert a normalised goal to a format/2 call suitable for a result page,
-%  or pass through compute goals unchanged.
-norm_to_result_call(norm_output(writeln(X)),       format('<p>~w</p>\n',  [X])) :- !.
-norm_to_result_call(norm_output(write(X)),         format('<span>~w</span>', [X])) :- !.
-norm_to_result_call(norm_output(nl),               format('<br/>\n'))            :- !.
-norm_to_result_call(norm_output(format(Fmt, Args)), format(Fmt, Args))           :- !.
-norm_to_result_call(norm_output(format(Fmt)),       format(Fmt))                 :- !.
-norm_to_result_call(norm_output(print(X)),         format('<p>~w</p>\n',  [X])) :- !.
-norm_to_result_call(norm_goal(G), G)                                             :- !.
-norm_to_result_call(_, format('<!-- goal -->\n')).
+% norm_output_to_html_term/2 and norm_output_to_result_call/2 are imported
+% from the html_output module (Stage 6).
 
 %% ce_goals_to_conj(+GoalList, -Conj) is det.
 %
