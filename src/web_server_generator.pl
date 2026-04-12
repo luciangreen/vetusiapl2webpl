@@ -19,8 +19,8 @@
  *   :- use_module(library(http/http_parameters)).
  *   :- use_module(library(http/http_header)).
  *
- *   :- http_handler(root(.), step_0, []).
- *   :- http_handler(root(step_1), step_1, [method(post)]).
+ *   :- http_handler(root(.), landing_pad_main, []).
+ *   :- http_handler(root(resume_main_1), resume_main_1, [method(post)]).
  *   ...
  *
  *   vetusia_server(Port) :-
@@ -29,8 +29,8 @@
  *   :- initialization(main, main).
  *   main :- vetusia_server(<Port>).
  *
- *   step_0(_Request) :- ...    % root GET handler (landing page)
- *   step_1(Request)  :- ...    % POST handler for continuation step 1
+ *   landing_pad_main(_Request) :- ...    % root GET handler (landing page)
+ *   resume_main_1(Request)     :- ...    % POST handler for continuation step 1
  *   ...
  *
  *   <auxiliary clauses from the input program>
@@ -112,14 +112,25 @@ wsg_find_main([C | Rest], Body, VN, [C | Others]) :-
 %  Write the complete generated web server program to Out.
 wsg_write_program(Out, Steps, VN, AuxNorms, Port) :-
     wsg_emit_header(Out),
+    nl(Out),
+    format(Out, "%% === HTTP Library Imports ===~n", []),
     wsg_emit_use_modules(Out),
     nl(Out),
+    format(Out, "%% === HTTP Handler Declarations ===~n", []),
     wsg_emit_handler_decls(Out, Steps),
     nl(Out),
+    format(Out, "%% === Server Bootstrap ===~n", []),
     wsg_emit_server_bootstrap(Out, Port),
+    format(Out, "%% === HTML Output Helpers ===~n", []),
     emit_html_helpers(Out),
+    nl(Out),
+    format(Out, "%% === HTTP Handler Clauses ===~n", []),
     maplist(write_cont_step(Out, VN), Steps),
-    wsg_emit_aux_clauses(Out, AuxNorms).
+    ( AuxNorms = [] -> true
+    ;   nl(Out),
+        format(Out, "%% === Auxiliary Predicates ===~n", []),
+        wsg_emit_aux_clauses(Out, AuxNorms)
+    ).
 
 % ==========================================================================
 % Internal: boilerplate emission
@@ -143,14 +154,14 @@ wsg_emit_use_modules(Out) :-
 %% wsg_emit_handler_decls(+Out, +Steps) is det.
 %
 %  Write http_handler/3 declarations.
-%  step_0 is always declared as the GET root handler (landing page).
+%  The first step is always declared as the GET root handler (landing page).
 %  All subsequent steps are declared as POST handlers.
 wsg_emit_handler_decls(Out, Steps) :-
-    format(Out, ":- http_handler(root(.), step_0, []).~n", []),
-    include(wsg_is_post_step, Steps, PostSteps),
+    ( Steps = [cont_step(LandingPadName, _, _, _) | PostSteps] -> true
+    ;   LandingPadName = step_0, PostSteps = []
+    ),
+    format(Out, ":- http_handler(root(.), ~w, []).~n", [LandingPadName]),
     maplist(wsg_emit_post_handler_decl(Out), PostSteps).
-
-wsg_is_post_step(cont_step(Name, _, _, _)) :- Name \= step_0.
 
 wsg_emit_post_handler_decl(Out, cont_step(Name, _, _, _)) :-
     format(Out, ":- http_handler(root(~w), ~w, [method(post)]).~n", [Name, Name]).

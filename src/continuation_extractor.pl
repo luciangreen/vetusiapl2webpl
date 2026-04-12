@@ -2,7 +2,8 @@
     extract_continuations/4,
     write_cont_steps/3,
     write_cont_step/3,
-    cont_step_name/2
+    cont_step_name/2,
+    cont_step_name/3
 ]).
 
 /** <module> continuation_extractor — Stage 4: Continuation Extraction Engine
@@ -20,7 +21,7 @@
  * --------------------------
  *   cont_step(StepName, RecvVarNames, PreGoals, Response)
  *
- *   StepName     — atom: handler predicate name (step_0, step_1, …)
+ *   StepName     — atom: handler predicate name (e.g. landing_pad_main, resume_main_1)
  *   RecvVarNames — list of atom names: variables received via http_parameters/2
  *   PreGoals     — list of norm_goal/1 terms to execute before rendering
  *   Response     — response term (see below)
@@ -57,7 +58,7 @@
  *
  *   retry_resp(TargetStep)
  *       Redirect back to TargetStep (used for retry loops).
- *       TargetStep — atom: entry handler to redirect to (always step_0)
+ *       TargetStep — atom: entry handler to redirect to (e.g. landing_pad_main)
  *
  * Usage
  * -----
@@ -88,11 +89,48 @@
 
 %% cont_step_name(+Index:integer, -Name:atom) is det.
 %
-%  Map a step index (0, 1, 2, …) to its handler atom name.
-%  step_0 is the entry GET handler; step_1 onward are POST handlers.
-cont_step_name(0, step_0) :- !.
-cont_step_name(N, Name) :-
+%  Backward-compatible arity-2 variant.  Delegates to cont_step_name/3 with
+%  PredName = none, producing the anonymous names step_0, step_1, …
+%  Use cont_step_name/3 when the original predicate name is available.
+cont_step_name(N, Name) :- cont_step_name(N, none, Name).
+
+%% cont_step_name(+Index:integer, +PredName:atom, -Name:atom) is det.
+%
+%  Map a step index and the original predicate name to a meaningful handler
+%  atom name (Stage 15 output naming rules):
+%
+%    Index 0, none     → step_0              (anonymous fallback)
+%    Index 0, PredName → landing_pad_<PredName>
+%    Index N, none     → step_N              (anonymous fallback)
+%    Index N, PredName → resume_<PredName>_<N>
+%
+%  The landing_pad_* prefix marks the entry GET handler; no HTTP parameters
+%  are received and the request argument is intentionally unused (_Request).
+%  The resume_* prefix marks POST handlers that resume the program continuation
+%  by receiving variables submitted from the previous form step.
+cont_step_name(0, none, step_0) :- !.
+cont_step_name(0, PredName, Name) :- !,
+    atom_concat(landing_pad_, PredName, Name).
+cont_step_name(N, none, Name) :- !,
     atom_concat(step_, N, Name).
+cont_step_name(N, PredName, Name) :-
+    atomic_list_concat([resume_, PredName, '_', N], Name).
+
+%% ce_pred_name(+Head, -PredName) is det.
+%
+%  Extract the functor name from a F/A head term, or return 'none' when
+%  the head is the atom 'none'.  Used to incorporate the original predicate
+%  name into generated handler names (Stage 15 naming rules).
+ce_pred_name(F/_, F) :- !.
+ce_pred_name(none, none).
+
+%% is_landing_pad_name(+Name:atom) is semidet.
+%
+%  True when Name is a landing-pad handler name — the entry GET handler.
+%  Used to select the correct Request variable name in write_cont_step and
+%  to determine the redirect target for retry_resp response terms.
+is_landing_pad_name(step_0) :- !.
+is_landing_pad_name(Name) :- sub_atom(Name, 0, _, _, landing_pad_).
 
 %% extract_continuations(+Checkpoints, +VarNames, +OrigHead, -Steps) is det.
 %
@@ -104,7 +142,7 @@ cont_step_name(N, Name) :-
 %  OrigHead    — F/A of the original predicate, or 'none'.
 %                When F/A is given, norm_goal calls to that predicate in
 %                continuation bodies are recognised as retry loops and
-%                compiled to retry_resp(step_0).
+%                compiled to retry_resp(landing_pad_<F>).
 %  Steps       — result: list of cont_step/4 terms
 %
 %  Stage 10: Each checkpoint's continuation is analysed for control-flow
@@ -126,7 +164,8 @@ extract_continuations(Checkpoints, VN, Head, Steps) :-
     %  since it's the first checkpoint, no vars were bound before it, so
     %  HiddenVars0 is typically empty).
     exclude(==(FirstVarName), FirstLiveVars, HiddenVars0),
-    cont_step_name(1, FirstNextStep),
+    ce_pred_name(Head, PredName),
+    cont_step_name(1, PredName, FirstNextStep),
     % Stage 9: use menu_resp when the first checkpoint is a menu pattern.
     ( is_menu_checkpoint(FirstCP, VN, FirstChoices, _FirstInvalidAction) ->
         menu_input_kind(FirstChoices, FirstMenuInputKind),
@@ -137,7 +176,8 @@ extract_continuations(Checkpoints, VN, Head, Steps) :-
         Step0Resp = form_resp(FirstPrompts, FirstVarName, HiddenVars0,
                               FirstNextStep, FirstInputType)
     ),
-    Step0 = cont_step(step_0, [], [], Step0Resp),
+    cont_step_name(0, PredName, Step0Name),
+    Step0 = cont_step(Step0Name, [], [], Step0Resp),
     % Generate steps 1..N from each checkpoint.
     gen_cont_steps(Checkpoints, VN, Head, ContSteps),
     Steps = [Step0 | ContSteps].
@@ -149,12 +189,19 @@ extract_continuations(Checkpoints, VN, Head, Steps) :-
 %  per cont_step — to the open output stream Out.
 write_cont_steps(Out, Steps, VN) :-
     emit_ce_header_comment(Out),
+    nl(Out),
+    format(Out, "%% === HTTP Library Imports ===~n", []),
     emit_ce_use_modules(Out),
     nl(Out),
+    format(Out, "%% === HTTP Handler Declarations ===~n", []),
     emit_ce_handler_decls(Out, Steps),
     nl(Out),
+    format(Out, "%% === Server Bootstrap ===~n", []),
     emit_ce_server_init(Out),
+    format(Out, "%% === HTML Output Helpers ===~n", []),
     emit_html_helpers(Out),
+    nl(Out),
+    format(Out, "%% === HTTP Handler Clauses ===~n", []),
     maplist(write_cont_step(Out, VN), Steps).
 
 % ==========================================================================
@@ -168,7 +215,8 @@ write_cont_steps(Out, Steps, VN) :-
 gen_cont_steps([], _, _, []).
 gen_cont_steps([CP | RestCPs], VN, Head, [Step | RestSteps]) :-
     CP = checkpoint(Id, _Kind, _VarName, _Prompts, Continuation, LiveVars, _Ctx),
-    cont_step_name(Id, StepName),
+    ce_pred_name(Head, PredName),
+    cont_step_name(Id, PredName, StepName),
     % Determine how many checkpoints lie within this continuation body.
     % These are the first NCont elements of RestCPs (depth-first order is
     % preserved by Stage 3, so positional slicing works correctly).
@@ -259,28 +307,31 @@ compile_cont_body(norm_disj(A, B), LiveVars, ContCPs, VN, Head,
 
 % A single norm_goal that is a direct recursive call → retry.
 compile_cont_body(norm_goal(Call), _LiveVars, _ContCPs, _VN, Head,
-                  retry_resp(step_0)) :-
+                  retry_resp(LandingName)) :-
     Head \= none,
     Head = F/A,
-    functor(Call, F, A), !.
+    functor(Call, F, A), !,
+    cont_step_name(0, F, LandingName).
 
 % A body with no reads that contains a recursive call somewhere → retry.
 % (Handles cases like norm_conj(norm_output(invalid), norm_goal(main)).)
 compile_cont_body(NormBody, _LiveVars, _ContCPs, _VN, Head,
-                  retry_resp(step_0)) :-
+                  retry_resp(LandingName)) :-
     Head \= none,
     Head = F/A,
     \+ contains_read_in_body(NormBody),
-    ce_body_has_call(NormBody, F, A), !.
+    ce_body_has_call(NormBody, F, A), !,
+    cont_step_name(0, F, LandingName).
 
 % Body contains at least one read — generate form_resp (or menu_resp for
 % menu patterns) using the first remaining checkpoint (ContCPs head).
-compile_cont_body(NormBody, _LiveVars, [NextCP | _], VN, _Head, Response) :-
+compile_cont_body(NormBody, _LiveVars, [NextCP | _], VN, Head, Response) :-
     contains_read_in_body(NormBody), !,
     NextCP = checkpoint(Id, Kind, InputVarName, Prompts, _, NextLiveVars, _),
     % Hidden vars = what step_{Id} receives minus the var it is about to read.
     exclude(==(InputVarName), NextLiveVars, HiddenVarNames),
-    cont_step_name(Id, NextStep),
+    ce_pred_name(Head, PredName),
+    cont_step_name(Id, PredName, NextStep),
     % Stage 9: use menu_resp when the next checkpoint is a menu pattern.
     ( is_menu_checkpoint(NextCP, VN, Choices, _InvalidAction) ->
         menu_input_kind(Choices, MenuInputKind),
@@ -420,11 +471,13 @@ emit_ce_use_modules(Out) :-
     format(Out, ":- use_module(library(http/http_header)).~n",   []).
 
 emit_ce_handler_decls(Out, Steps) :-
-    format(Out, ":- http_handler(root(.), step_0, []).~n", []),
-    include(is_post_step, Steps, PostSteps),
+    ( Steps = [cont_step(LandingPadName, _, _, _) | PostSteps] -> true
+    ;   LandingPadName = step_0, PostSteps = []
+    ),
+    format(Out, ":- http_handler(root(.), ~w, []).~n", [LandingPadName]),
     maplist(emit_ce_handler_decl(Out), PostSteps).
 
-is_post_step(cont_step(Name, _, _, _)) :- Name \= step_0.
+is_post_step(cont_step(Name, _, _, _)) :- \+ is_landing_pad_name(Name).
 
 emit_ce_handler_decl(Out, cont_step(Name, _, _, _)) :-
     format(Out, ":- http_handler(root(~w), ~w, [method(post)]).~n", [Name, Name]).
@@ -453,9 +506,9 @@ emit_ce_server_init(Out) :-
 %  generated source so that developers can identify constructs that were not
 %  fully preserved.
 write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) :-
-    % Request variable: underscore-prefixed for step_0 (never used),
+    % Request variable: underscore-prefixed for the landing-pad (never used),
     % plain for all POST steps (passed to http_parameters/2 and http_redirect/3).
-    ( StepName = step_0 -> ReqAtom = '_Request' ; ReqAtom = 'Request' ),
+    ( is_landing_pad_name(StepName) -> ReqAtom = '_Request' ; ReqAtom = 'Request' ),
 
     % ── Stage 8: create raw variable pairs for http_parameters ────────────
     %  For each received variable 'Name', create a fresh 'Name_raw' variable.
@@ -494,6 +547,8 @@ write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) 
     Head =.. [StepName, ReqVar],
     Clause = (Head :- Body),
     nl(Out),
+    % Stage 15: emit a section comment marking this handler's role.
+    emit_step_comment(Out, StepName, RecvVarNames),
     % Stage 10: emit TODO comments for any approximately-preserved constructs.
     collect_todo_messages(Response, TodoMsgs),
     maplist(emit_todo_comment(Out), TodoMsgs),
@@ -692,7 +747,7 @@ response_to_goal(cond_resp(CondGoals, ThenResp, ElseResp), ReqVar, VN,
     ).
 
 response_to_goal(retry_resp(TargetStep), ReqVar, _VN, _SerialPairs, Goal) :-
-    ( TargetStep = step_0 ->
+    ( is_landing_pad_name(TargetStep) ->
         Goal = http_redirect(see_other, root(.), ReqVar)
     ;   atom_concat('/', TargetStep, Path),
         Goal = http_redirect(see_other, root(Path), ReqVar)
@@ -727,6 +782,23 @@ collect_todo_messages(_, []).
 %  Write a TODO comment line to the output stream Out.
 emit_todo_comment(Out, Message) :-
     format(Out, "%% TODO: ~w~n", [Message]).
+
+%% emit_step_comment(+Out, +StepName, +RecvVarNames) is det.
+%
+%  Write a section comment before a handler clause marking its role
+%  (Stage 15 comment insertion rules).
+%  Landing-pad handlers are labelled "Entry GET handler (landing page)".
+%  Resume handlers list the variables they receive via http_parameters/2.
+emit_step_comment(Out, StepName, RecvVarNames) :-
+    ( is_landing_pad_name(StepName) ->
+        format(Out, "%% --- ~w : Entry GET handler (landing page) ---~n", [StepName])
+    ;   ( RecvVarNames = [] ->
+            format(Out, "%% --- ~w : POST handler ---~n", [StepName])
+        ;   atomic_list_concat(RecvVarNames, ', ', VarList),
+            format(Out, "%% --- ~w : POST handler (receives: ~w) ---~n",
+                   [StepName, VarList])
+        )
+    ).
 
 % ==========================================================================
 % Internal: HTML / output helpers

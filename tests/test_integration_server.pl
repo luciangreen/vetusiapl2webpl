@@ -145,9 +145,9 @@ test(input_example_produces_valid_output, [
     read_all_lines(S, Lines),
     close(S),
     % Structural checks
-    lines_contain(Lines, 'step_0('),
-    lines_contain(Lines, 'step_1('),
-    lines_contain(Lines, 'step_2('),
+    lines_contain(Lines, 'landing_pad_main('),
+    lines_contain(Lines, 'resume_main_1('),
+    lines_contain(Lines, 'resume_main_2('),
     lines_contain(Lines, 'http_handler'),
     lines_contain(Lines, 'vetusia_server(Port)'),
     lines_contain(Lines, 'initialization(main, main)'),
@@ -165,14 +165,14 @@ test(auth_example_all_steps, [
     open(TmpFile, read, S),
     read_all_lines(S, Lines),
     close(S),
-    lines_contain(Lines, 'step_0('),
-    lines_contain(Lines, 'step_1('),
-    lines_contain(Lines, 'step_2('),
-    lines_contain(Lines, 'step_3('),
-    lines_contain(Lines, 'step_4('),
-    lines_contain(Lines, 'step_5('),
-    lines_contain(Lines, 'step_6('),
-    lines_contain(Lines, 'step_7(').
+    lines_contain(Lines, 'landing_pad_main('),
+    lines_contain(Lines, 'resume_main_1('),
+    lines_contain(Lines, 'resume_main_2('),
+    lines_contain(Lines, 'resume_main_3('),
+    lines_contain(Lines, 'resume_main_4('),
+    lines_contain(Lines, 'resume_main_5('),
+    lines_contain(Lines, 'resume_main_6('),
+    lines_contain(Lines, 'resume_main_7(').
 
 %% Variables from the auth example are preserved in the output.
 test(auth_example_variables_preserved, [
@@ -315,20 +315,20 @@ test(auth_server_all_flows, [
     RootStatus =:= 200,
     %% 2. Root route renders an HTML form (menu).
     ( sub_atom(RootBody, _, _, _, 'form') ; sub_atom(RootBody, _, _, _, 'radio') ), !,
-    %% 3. POSTing Choice=1 to /step_1 enters the Register flow.
-    sit_http_post_form('http://localhost:18182/step_1',
+    %% 3. POSTing Choice=1 to /resume_main_1 enters the Register flow.
+    sit_http_post_form('http://localhost:18182/resume_main_1',
                        ['Choice'='1'], RegStatus, _RegBody),
     ( RegStatus =:= 200 ; RegStatus =:= 302 ),
-    %% 4. POSTing Choice=2 to /step_1 enters the Login flow.
-    sit_http_post_form('http://localhost:18182/step_1',
+    %% 4. POSTing Choice=2 to /resume_main_1 enters the Login flow.
+    sit_http_post_form('http://localhost:18182/resume_main_1',
                        ['Choice'='2'], LoginStatus, _LoginBody),
     ( LoginStatus =:= 200 ; LoginStatus =:= 302 ),
-    %% 5. POSTing Choice=3 to /step_1 enters the Forgot Password flow.
-    sit_http_post_form('http://localhost:18182/step_1',
+    %% 5. POSTing Choice=3 to /resume_main_1 enters the Forgot Password flow.
+    sit_http_post_form('http://localhost:18182/resume_main_1',
                        ['Choice'='3'], ForgotStatus, _ForgotBody),
     ( ForgotStatus =:= 200 ; ForgotStatus =:= 302 ),
     %% 6. POSTing an invalid choice should redirect or re-render (retry loop).
-    sit_http_post_form('http://localhost:18182/step_1',
+    sit_http_post_form('http://localhost:18182/resume_main_1',
                        ['Choice'='9'], InvalidStatus, _InvalidBody),
     ( InvalidStatus =:= 302 ; InvalidStatus =:= 200 ).
 
@@ -357,35 +357,34 @@ test(auth_has_eight_steps) :-
 %% Step 0 is the entry point with no received variables.
 test(auth_step0_entry_no_recv_vars) :-
     auth_cont_steps([Step0 | _], _),
-    Step0 = cont_step(step_0, [], _, _).
+    Step0 = cont_step(landing_pad_main, [], _, _).
 
-%% Step 1 receives the Choice variable (dispatches on menu).
+%% resume_main_1 receives the Choice variable (dispatches on menu).
 test(auth_step1_receives_choice) :-
     auth_cont_steps([_, Step1 | _], _),
-    Step1 = cont_step(step_1, RecvVars, _, _),
+    Step1 = cont_step(resume_main_1, RecvVars, _, _),
     memberchk('Choice', RecvVars).
 
-%% Register flow (choice=1): step 2 has received Username from step_1's
-%% then-arm form and is now showing the Password input.
+%% Register flow (choice=1): resume_main_2 has received Username and is now showing the Password input.
 test(auth_register_step2_form_for_password) :-
     auth_cont_steps(Steps, _),
     nth1(3, Steps, Step2),
-    Step2 = cont_step(step_2, RecvVars, _, form_resp(_, 'Password', _, _, password)),
+    Step2 = cont_step(resume_main_2, RecvVars, _, form_resp(_, 'Password', _, _, password)),
     memberchk('Username', RecvVars).
 
-%% Register flow: step 3 has received Password and Username; asks for Email.
+%% Register flow: resume_main_3 has received Password and Username; asks for Email.
 test(auth_register_step3_form_for_email) :-
     auth_cont_steps(Steps, _),
     nth1(4, Steps, Step3),
-    Step3 = cont_step(step_3, RecvVars, _, form_resp(_, 'Email', _, _, _)),
+    Step3 = cont_step(resume_main_3, RecvVars, _, form_resp(_, 'Email', _, _, _)),
     memberchk('Password', RecvVars),
     memberchk('Username', RecvVars).
 
-%% Register flow: step 4 is the result step — has all three variables.
+%% Register flow: resume_main_4 is the result step — has all three variables.
 test(auth_register_step4_is_result) :-
     auth_cont_steps(Steps, _),
     nth1(5, Steps, Step4),
-    Step4 = cont_step(step_4, RecvVars, _, result_resp(_, _)),
+    Step4 = cont_step(resume_main_4, RecvVars, _, result_resp(_, _)),
     memberchk('Username', RecvVars),
     memberchk('Password', RecvVars),
     memberchk('Email',    RecvVars).
@@ -399,18 +398,18 @@ test(auth_register_has_result_step) :-
     memberchk('Password', RecvVars),
     memberchk('Email', RecvVars).
 
-%% Login flow: step 5 has received Username and asks for Password.
+%% Login flow: resume_main_5 has received Username and asks for Password.
 test(auth_login_step5_form_for_password) :-
     auth_cont_steps(Steps, _),
     nth1(6, Steps, Step5),
-    Step5 = cont_step(step_5, RecvVars, _, form_resp(_, 'Password', _, _, password)),
+    Step5 = cont_step(resume_main_5, RecvVars, _, form_resp(_, 'Password', _, _, password)),
     memberchk('Username', RecvVars).
 
-%% Login flow: step 6 is the result step — has Username and Password.
+%% Login flow: resume_main_6 is the result step — has Username and Password.
 test(auth_login_step6_is_result) :-
     auth_cont_steps(Steps, _),
     nth1(7, Steps, Step6),
-    Step6 = cont_step(step_6, RecvVars, _, result_resp(_, _)),
+    Step6 = cont_step(resume_main_6, RecvVars, _, result_resp(_, _)),
     memberchk('Username', RecvVars),
     memberchk('Password', RecvVars).
 
@@ -423,11 +422,11 @@ test(auth_login_has_result_step) :-
     memberchk('Password', RecvVars),
     \+ memberchk('Email', RecvVars).
 
-%% Forgot-password flow: step 7 has received Email and is the result step.
+%% Forgot-password flow: resume_main_7 has received Email and is the result step.
 test(auth_forgot_password_step7_is_result) :-
     auth_cont_steps(Steps, _),
     nth1(8, Steps, Step7),
-    Step7 = cont_step(step_7, RecvVars, _, result_resp(_, _)),
+    Step7 = cont_step(resume_main_7, RecvVars, _, result_resp(_, _)),
     memberchk('Email', RecvVars).
 
 :- end_tests(multi_step_flow_structure).
@@ -438,7 +437,7 @@ test(auth_forgot_password_step7_is_result) :-
 
 :- begin_tests(invalid_input_loop_structure).
 
-%% The auth example must contain a retry_resp(step_0) in the steps,
+%% The auth example must contain a retry_resp(landing_pad_main) in the steps,
 %% corresponding to the invalid-choice branch.
 test(auth_has_retry_resp) :-
     sit_input_file('auth_example.pl', File),
@@ -448,7 +447,7 @@ test(auth_has_retry_resp) :-
     extract_continuations(CPs, VN, main/0, Steps),
     member(Step, Steps),
     Step = cont_step(_, _, _, Resp),
-    response_has_retry(Resp, step_0).
+    response_has_retry(Resp, landing_pad_main).
 
 %% The generated output must include http_redirect (for the retry loop).
 test(auth_generated_code_has_redirect, [
@@ -482,9 +481,9 @@ test(simple_retry_loop_structure) :-
     extract_continuations(CPs, VN, loop/0, Steps),
     member(Step, Steps),
     Step = cont_step(_, _, _, Resp),
-    response_has_retry(Resp, step_0).
+    response_has_retry(Resp, landing_pad_loop).
 
-%% Menu redisplay: the menu step (step_0) is the target of the retry.
+%% Menu redisplay: the landing-pad handler is the target of the retry.
 test(retry_targets_step_0) :-
     V = _,
     VN = ['X' = V],
@@ -495,7 +494,7 @@ test(retry_targets_step_0) :-
     detect_checkpoints(Body, VN, retry_me/0, CPs),
     extract_continuations(CPs, VN, retry_me/0, Steps),
     member(Step, Steps),
-    Step = cont_step(_, _, _, retry_resp(step_0)).
+    Step = cont_step(_, _, _, retry_resp(landing_pad_retry_me)).
 
 :- end_tests(invalid_input_loop_structure).
 
