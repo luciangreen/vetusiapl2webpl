@@ -46,6 +46,22 @@ test(step_1_is_step_1) :-
 test(step_10_is_step_10) :-
     cont_step_name(10, step_10).
 
+% Stage 15: cont_step_name/3 with pred name produces meaningful names.
+test(named_step_0_is_landing_pad) :-
+    cont_step_name(0, main, landing_pad_main).
+
+test(named_step_1_is_resume) :-
+    cont_step_name(1, main, resume_main_1).
+
+test(named_step_10_is_resume) :-
+    cont_step_name(10, main, resume_main_10).
+
+test(named_none_step_0_fallback) :-
+    cont_step_name(0, none, step_0).
+
+test(named_none_step_n_fallback) :-
+    cont_step_name(3, none, step_3).
+
 :- end_tests(cont_step_name).
 
 % ==========================================================================
@@ -230,18 +246,18 @@ test(retry_produces_two_steps) :-
 test(retry_step_1_has_cond_resp) :-
     retry_loop_cps(CPs, VN),
     extract_continuations(CPs, VN, loop/0, [_, Step1]),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, _, _)).
+    Step1 = cont_step(resume_loop_1, _, _, cond_resp(_, _, _)).
 
 test(retry_else_is_retry_resp) :-
     retry_loop_cps(CPs, VN),
     extract_continuations(CPs, VN, loop/0, [_, Step1]),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, _, ElseResp)),
-    ElseResp = retry_resp(step_0).
+    Step1 = cont_step(resume_loop_1, _, _, cond_resp(_, _, ElseResp)),
+    ElseResp = retry_resp(landing_pad_loop).
 
 test(retry_then_is_result_resp) :-
     retry_loop_cps(CPs, VN),
     extract_continuations(CPs, VN, loop/0, [_, Step1]),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, ThenResp, _)),
+    Step1 = cont_step(resume_loop_1, _, _, cond_resp(_, ThenResp, _)),
     ThenResp = result_resp(_, _).
 
 %% A bare recursive call as the entire continuation body.
@@ -257,8 +273,8 @@ bare_retry_cps(CPs, VN) :-
 test(bare_retry_continuation_is_retry_resp) :-
     bare_retry_cps(CPs, VN),
     extract_continuations(CPs, VN, bare_retry/0, Steps),
-    Steps = [Step0, Step1],
-    Step1 = cont_step(step_1, _, _, retry_resp(step_0)).
+    Steps = [_Step0, Step1],
+    Step1 = cont_step(resume_bare_retry_1, _, _, retry_resp(landing_pad_bare_retry)).
 
 :- end_tests(extract_continuations_retry).
 
@@ -399,79 +415,79 @@ test(auth_produces_eight_steps) :-
 
 %% The first step is the entry GET handler.
 test(auth_step_0_is_entry) :-
-    auth_steps([cont_step(step_0, [], _, _) | _], _).
+    auth_steps([cont_step(landing_pad_main, [], _, _) | _], _).
 
-%% step_0 asks for the menu Choice via a menu_resp (Stage 9).
+%% landing_pad_main asks for the menu Choice via a menu_resp (Stage 9).
 test(auth_step_0_asks_for_choice) :-
     auth_steps([Step0 | _], _),
-    Step0 = cont_step(step_0, _, _, menu_resp(_, 'Choice', _, _, step_1, _)).
+    Step0 = cont_step(landing_pad_main, _, _, menu_resp(_, 'Choice', _, _, resume_main_1, _)).
 
-%% step_1 dispatches on the menu choice (cond_resp).
+%% resume_main_1 dispatches on the menu choice (cond_resp).
 test(auth_step_1_has_cond_resp) :-
     auth_steps([_, Step1 | _], _),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, _, _)).
+    Step1 = cont_step(resume_main_1, _, _, cond_resp(_, _, _)).
 
-%% step_1 receives the Choice variable.
+%% resume_main_1 receives the Choice variable.
 test(auth_step_1_receives_choice) :-
     auth_steps([_, Step1 | _], _),
-    Step1 = cont_step(step_1, RecvVars, _, _),
+    Step1 = cont_step(resume_main_1, RecvVars, _, _),
     memberchk('Choice', RecvVars).
 
-%% The then-arm of step_1 is a form asking for Username (Register flow).
+%% The then-arm of resume_main_1 is a form asking for Username (Register flow).
 test(auth_step_1_then_is_form_for_username) :-
     auth_steps([_, Step1 | _], _),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, ThenResp, _)),
+    Step1 = cont_step(resume_main_1, _, _, cond_resp(_, ThenResp, _)),
     ThenResp = form_resp(_, 'Username', _, _, _).
 
-%% The register flow leads to step_2 (Username) → step_3 (Password) → step_4 (Email) → result.
+%% The register flow leads to resume_main_2 (Username) → resume_main_3 (Password) → resume_main_4 (Email) → result.
 test(auth_register_then_arm_posts_to_step_2) :-
     auth_steps([_, Step1 | _], _),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, form_resp(_, _, _, step_2, _), _)).
+    Step1 = cont_step(resume_main_1, _, _, cond_resp(_, form_resp(_, _, _, resume_main_2, _), _)).
 
-%% step_2 (Username in Register) posts to step_3 (Password).
+%% resume_main_2 (Username in Register) posts to resume_main_3 (Password).
 test(auth_step_2_posts_to_step_3) :-
     auth_steps(Steps, _),
     nth1(3, Steps, Step2),
-    Step2 = cont_step(step_2, _, _, form_resp(_, 'Password', _, step_3, _)).
+    Step2 = cont_step(resume_main_2, _, _, form_resp(_, 'Password', _, resume_main_3, _)).
 
-%% step_3 (Password in Register) posts to step_4 (Email).
+%% resume_main_3 (Password in Register) posts to resume_main_4 (Email).
 test(auth_step_3_posts_to_step_4) :-
     auth_steps(Steps, _),
     nth1(4, Steps, Step3),
-    Step3 = cont_step(step_3, _, _, form_resp(_, 'Email', _, step_4, _)).
+    Step3 = cont_step(resume_main_3, _, _, form_resp(_, 'Email', _, resume_main_4, _)).
 
-%% step_4 is the Register result step.
+%% resume_main_4 is the Register result step.
 test(auth_step_4_is_result) :-
     auth_steps(Steps, _),
     nth1(5, Steps, Step4),
-    Step4 = cont_step(step_4, _, _, result_resp(_, _)).
+    Step4 = cont_step(resume_main_4, _, _, result_resp(_, _)).
 
 %% The retry (invalid choice) branch generates a retry_resp.
 test(auth_invalid_choice_generates_retry) :-
     auth_steps(Steps, _),
-    % Find the cond_resp in step_1 and search recursively for retry_resp.
+    % Find the cond_resp in resume_main_1 and search recursively for retry_resp.
     member(Step, Steps),
     Step = cont_step(_, _, _, Response),
-    response_contains_retry(Response, step_0).
+    response_contains_retry(Response, landing_pad_main).
 
-%% The login flow (Choice = "2") posts first to step_5 (Username).
+%% The login flow (Choice = "2") posts first to resume_main_5 (Username).
 test(auth_login_branch_posts_to_step_5) :-
     auth_steps(Steps, _),
     nth1(2, Steps, Step1),
-    Step1 = cont_step(step_1, _, _, Resp),
-    find_step_in_response(Resp, step_5).
+    Step1 = cont_step(resume_main_1, _, _, Resp),
+    find_step_in_response(Resp, resume_main_5).
 
-%% step_6 (Login Password) is a result step.
+%% resume_main_6 (Login Password) is a result step.
 test(auth_step_6_is_result) :-
     auth_steps(Steps, _),
     nth1(7, Steps, Step6),
-    Step6 = cont_step(step_6, _, _, result_resp(_, _)).
+    Step6 = cont_step(resume_main_6, _, _, result_resp(_, _)).
 
-%% step_7 is the Forgot Password result step.
+%% resume_main_7 is the Forgot Password result step.
 test(auth_step_7_is_result) :-
     auth_steps(Steps, _),
     nth1(8, Steps, Step7),
-    Step7 = cont_step(step_7, _, _, result_resp(_, _)).
+    Step7 = cont_step(resume_main_7, _, _, result_resp(_, _)).
 
 :- end_tests(auth_integration).
 
@@ -506,8 +522,8 @@ test(write_cont_steps_produces_output) :-
     ).
 
 assert_output_structure(Lines) :-
-    lines_contain(Lines, 'step_0'),
-    lines_contain(Lines, 'step_1'),
+    lines_contain(Lines, 'landing_pad_main'),
+    lines_contain(Lines, 'resume_main_1'),
     lines_contain(Lines, 'http_handler'),
     lines_contain(Lines, 'http_parameters'),
     lines_contain(Lines, 'reply_html_page').

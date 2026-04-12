@@ -215,14 +215,14 @@ test(input_example_default_port, [
     % initialization directive
     lines_contain(Lines, 'initialization(main, main)'),
     % Step handlers
-    lines_contain(Lines, 'step_0('),
-    lines_contain(Lines, 'step_1('),
-    lines_contain(Lines, 'step_2('),
+    lines_contain(Lines, 'landing_pad_main('),
+    lines_contain(Lines, 'resume_main_1('),
+    lines_contain(Lines, 'resume_main_2('),
     % html reply
     lines_contain(Lines, 'reply_html_page'),
     % form action targets
-    lines_contain(Lines, '/step_1'),
-    lines_contain(Lines, '/step_2').
+    lines_contain(Lines, '/resume_main_1'),
+    lines_contain(Lines, '/resume_main_2').
 
 test(input_example_custom_port, [
         setup(tmp_file_stream(text, TmpFile, TmpStream)),
@@ -266,8 +266,8 @@ test(auth_example_branching, [
     lines_contain(Lines, 'vetusia_server(8080)'),
     lines_contain(Lines, 'http_handler'),
     % Multiple step handlers generated for branching flow
-    lines_contain(Lines, 'step_0('),
-    lines_contain(Lines, 'step_1(').
+    lines_contain(Lines, 'landing_pad_main('),
+    lines_contain(Lines, 'resume_main_1(').
 
 :- end_tests(generate_web_server_auth_integration).
 
@@ -291,19 +291,19 @@ test(auth_all_step_handlers, [
     open(TmpFile, read, S),
     read_all_lines(S, Lines),
     close(S),
-    % Root GET handler (step_0 — landing page)
-    lines_contain(Lines, 'step_0('),
-    % Continuation handlers for the branching flow (step_1 dispatch + sub-flows)
-    lines_contain(Lines, 'step_1('),
+    % Root GET handler (landing_pad_main — landing page)
+    lines_contain(Lines, 'landing_pad_main('),
+    % Continuation handlers for the branching flow (resume_main_1 dispatch + sub-flows)
+    lines_contain(Lines, 'resume_main_1('),
     % Register flow: Username → Password → Email → result
-    lines_contain(Lines, 'step_2('),
-    lines_contain(Lines, 'step_3('),
-    lines_contain(Lines, 'step_4('),
+    lines_contain(Lines, 'resume_main_2('),
+    lines_contain(Lines, 'resume_main_3('),
+    lines_contain(Lines, 'resume_main_4('),
     % Login flow: Username → Password → result
-    lines_contain(Lines, 'step_5('),
-    lines_contain(Lines, 'step_6('),
+    lines_contain(Lines, 'resume_main_5('),
+    lines_contain(Lines, 'resume_main_6('),
     % Forgot password flow: Email → result
-    lines_contain(Lines, 'step_7(').
+    lines_contain(Lines, 'resume_main_7(').
 
 test(auth_root_handler_declaration, [
         setup(tmp_file_stream(text, TmpFile, TmpStream)),
@@ -391,10 +391,10 @@ test(auth_branching_dispatch, [
     open(TmpFile, read, S),
     read_all_lines(S, Lines),
     close(S),
-    % Branching form targets: step_1 dispatches to three sub-flows
-    lines_contain(Lines, '/step_2'),
-    lines_contain(Lines, '/step_5'),
-    lines_contain(Lines, '/step_7').
+    % Branching form targets: resume_main_1 dispatches to three sub-flows
+    lines_contain(Lines, '/resume_main_2'),
+    lines_contain(Lines, '/resume_main_5'),
+    lines_contain(Lines, '/resume_main_7').
 
 test(auth_result_format_calls_preserved, [
         setup(tmp_file_stream(text, TmpFile, TmpStream)),

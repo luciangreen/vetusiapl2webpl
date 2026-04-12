@@ -42,8 +42,8 @@
  *
  *   recursion / retry loop (norm_goal matching ClauseHead)
  *       A direct recursive call to the original predicate is compiled to an
- *       HTTP redirect back to step_0 (retry_resp), preserving the loop
- *       semantics under the assumption that no mutable state is shared
+ *       HTTP redirect back to the landing-pad handler (retry_resp), preserving
+ *       the loop semantics under the assumption that no mutable state is shared
  *       between iterations outside of the HTTP session.
  *       Context tag: loop(F/A).
  *
