@@ -1,6 +1,7 @@
 :- module(continuation_extractor, [
     extract_continuations/4,
     write_cont_steps/3,
+    write_cont_step/3,
     cont_step_name/2
 ]).
 

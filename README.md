@@ -44,16 +44,24 @@ Download the installer from <https://www.swi-prolog.org/Download.html>.
 
 ## Quick Start
 
-### One-command conversion
+### One-command conversion (Stage 5 — full pipeline)
 
 ```bash
-swipl -g "use_module('src/vetusiapl2webpl'), \
-           convert('examples/input_example.pl', \
-                   'output/web_example.pl'), halt" -t halt
+swipl -g "use_module('src/web_server_generator'), \
+           generate_web_server('examples/input_example.pl', \
+                               'output/web_example.pl'), halt" -t halt
 ```
 
 This reads `examples/input_example.pl` (a terminal Prolog program) and
 writes `output/web_example.pl` (a runnable SWI-Prolog HTTP server).
+
+Use `generate_web_server/3` to choose a custom port:
+
+```bash
+swipl -g "use_module('src/web_server_generator'), \
+           generate_web_server('examples/input_example.pl', \
+                               'output/web_example.pl', 9090), halt" -t halt
+```
 
 ### Run the generated server
 
@@ -61,15 +69,22 @@ writes `output/web_example.pl` (a runnable SWI-Prolog HTTP server).
 swipl output/web_example.pl
 ```
 
-Then open <http://localhost:8080> in your browser.
+Then open <http://localhost:8080> in your browser (or the custom port you
+chose).  You can also start the server on a different port without
+regenerating the file:
+
+```bash
+swipl -g "consult('output/web_example.pl'), vetusia_server(9090), halt" -t halt
+```
 
 ---
 
 ## Interactive Usage (SWI-Prolog REPL)
 
 ```prolog
-?- use_module('src/vetusiapl2webpl').
-?- convert('examples/input_example.pl', 'output/web_example.pl').
+?- use_module('src/web_server_generator').
+?- generate_web_server('examples/input_example.pl', 'output/web_example.pl').
+?- generate_web_server('examples/input_example.pl', 'output/web_example.pl', 9090).
 ```
 
 ---
@@ -137,6 +152,15 @@ step_2(Request) :-
 ## Running the Tests
 
 ```bash
+# Stage 5 — web server generator
+swipl -g "load_test_files([]), run_tests, halt" -t halt \
+      tests/test_web_server_generator.pl
+
+# Stage 4 — continuation extractor
+swipl -g "load_test_files([]), run_tests, halt" -t halt \
+      tests/test_continuation_extractor.pl
+
+# Original converter (Stage 4+)
 swipl -g "load_test_files([]), run_tests, halt" -t halt \
       tests/test_vetusiapl2webpl.pl
 ```
@@ -148,12 +172,20 @@ swipl -g "load_test_files([]), run_tests, halt" -t halt \
 ```
 vetusiapl2webpl/
 ├── src/
-│   └── vetusiapl2webpl.pl        ← converter (entry point: convert/2)
+│   ├── reader.pl                 ← Stage 2: source reader and normaliser
+│   ├── checkpoint_detector.pl    ← Stage 3: web conversion point detector
+│   ├── continuation_extractor.pl ← Stage 4: continuation extraction engine
+│   ├── web_server_generator.pl   ← Stage 5: web server skeleton generator (entry point)
+│   └── vetusiapl2webpl.pl        ← original single-module converter (convert/2)
 ├── examples/
 │   ├── input_example.pl          ← sample terminal Prolog input
 │   └── output_example.pl         ← reference web Prolog output
 ├── tests/
-│   └── test_vetusiapl2webpl.pl   ← plunit test suite
+│   ├── test_reader.pl                ← Stage 2 test suite
+│   ├── test_checkpoint_detector.pl   ← Stage 3 test suite
+│   ├── test_continuation_extractor.pl← Stage 4 test suite
+│   ├── test_web_server_generator.pl  ← Stage 5 test suite
+│   └── test_vetusiapl2webpl.pl       ← original converter test suite
 ├── docs/
 │   └── architecture.md           ← design and extension guide
 ├── output/                       ← default output directory
