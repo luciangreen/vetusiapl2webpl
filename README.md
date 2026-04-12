@@ -22,7 +22,8 @@ interaction, with no JavaScript required.
 8. [Running the Tests](#running-the-tests)
 9. [Project Layout](#project-layout)
 10. [Architecture](#architecture)
-11. [License](#license)
+11. [PR Completion Criteria](#pr-completion-criteria)
+12. [License](#license)
 
 ---
 
@@ -565,6 +566,18 @@ of the conversion pipeline, data structures, and extension points.
 
 See [`docs/supported_patterns.md`](docs/supported_patterns.md) for a
 reference of every Prolog pattern the converter handles, with examples.
+
+---
+
+## PR Completion Criteria
+
+See [`docs/completion_criteria.md`](docs/completion_criteria.md) for the
+Stage 18 pull-request completion checklist.  That document maps each of the
+seven formal requirements (working code, examples, test suite, README,
+demonstration, no-JavaScript constraint, supported/unsupported construct
+reference) to the concrete files in this repository, and includes an
+acceptance-standard table showing how `examples/auth_example.pl` →
+`examples/auth_web_example.pl` satisfies every criterion.
 
 ---
 
