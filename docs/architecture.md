@@ -598,7 +598,241 @@ instead of silently discarding it.
 
 ```
 src/
-  control_flow_transformer.pl   ← Stage 10 (new)
+  control_flow_transformer.pl   ← Stage 10
 tests/
-  test_control_flow_transformer.pl  ← Stage 10 plunit test suite (new)
+  test_control_flow_transformer.pl  ← Stage 10 plunit test suite
 ```
+
+---
+
+## Stage 7 — Form Generator (`src/form_generator.pl`)
+
+### Purpose
+
+Stage 7 converts `cont_step` response terms into SWI-Prolog HTML term
+structures suitable for use inside `reply_html_page/2`.  It decides which
+HTML input widget to emit for each `read_string` checkpoint.
+
+### Input kind selection
+
+| Condition | Widget emitted |
+|-----------|---------------|
+| Variable name contains `password` (case-insensitive) | `input([type=password, name=V, autofocus=autofocus])` |
+| Response term is `menu_resp` with `InputKind = radio` | `input([type=radio, name=V, value=Choice])` per option |
+| Response term is `menu_resp` with `InputKind = select` | `select([name=V], [option([value=C], Label), …])` |
+| Response term is `form_resp` with `InputKind = textarea` | `textarea([name=V, rows=5, cols=40, autofocus=autofocus], [])` |
+| All other cases | `input([type=text, name=V, autofocus=autofocus])` |
+
+### Public API
+
+```prolog
+form_input_kind(+VarName:atom, -Kind:atom)
+    % Determine the input widget kind for a variable name.
+    % Kind is one of: text | password | textarea
+
+generate_form_html(+ContStep, -HtmlTerms:list)
+    % Convert a cont_step response into a list of HTML terms for reply_html_page/2.
+
+hidden_fields_html(+VarNames:list, +Bindings, -HtmlTerms:list)
+    % Emit hidden input elements for a list of variable name + value pairs.
+```
+
+---
+
+## Stage 8 — State Serialiser (`src/state_serialiser.pl`)
+
+### Purpose
+
+Stage 8 provides the `state_serialise/2` and `state_deserialise/2`
+predicates that are inlined into every generated web server.  They are
+the foundation of the converter's state-preservation mechanism.
+
+### Mechanism
+
+Variables cannot survive HTTP request boundaries because each HTTP request
+is handled independently.  The converter threads live variables across
+requests by:
+
+1. **Serialising** each live variable value to an atom via `term_to_atom/2`
+   at the end of each intermediate handler.
+2. **Embedding** the serialised atom as the value of an
+   `<input type="hidden">` field in the outgoing HTML form.
+3. **Extracting** the hidden field value in the next handler via
+   `http_parameters/2` (which yields an atom).
+4. **Deserialising** the atom back to the original Prolog term via
+   `term_to_atom/2` in `state_deserialise/2`.
+
+### Round-trip guarantee
+
+For every ground Prolog term `T`:
+
+```prolog
+state_serialise(T, A), state_deserialise(A, T2)  ⟹  T2 == T
+```
+
+This holds for atoms, integers, floats, SWI strings, lists, and compound
+terms.  When `A` cannot be parsed as Prolog (e.g. a plain user-typed string
+like `"Alice"`), `state_deserialise/2` falls back to `T2 = A` (identity),
+preserving the raw user input unchanged.
+
+### Public API
+
+```prolog
+state_serialise(+Term, -Atom:atom)
+    % Convert a ground Prolog term to a canonical atom (via term_to_atom/2).
+
+state_deserialise(+Atom:atom, -Term)
+    % Parse a previously serialised atom back to its original term.
+    % Falls back to Term = Atom when the atom is not valid Prolog syntax.
+```
+
+### Integration
+
+`continuation_extractor.pl` (Stage 4) calls `emit_state_serialiser_helpers/1`
+inside `write_cont_steps/3` so that the `state_serialise/state_deserialise`
+definitions are inlined verbatim into every generated file.
+
+---
+
+## Stage 9 — Menu Recogniser (`src/menu_recogniser.pl`)
+
+### Purpose
+
+Stage 9 detects numbered menu patterns — sequences of `writeln` prompts
+containing `'N. Label'` items — and annotates the associated `read_string`
+checkpoint with a `menu_resp` response term instead of the default `form_resp`.
+
+### Menu detection
+
+A menu is recognised when, at the checkpoint for a given `read_string`:
+
+1. The preceding prompts list contains at least two items matching the
+   pattern `'<integer>. <text>'` (e.g. `'1. Register'`, `'2. Login'`).
+2. The continuation of the checkpoint is a branching construct
+   (if-then-else or disjunction) whose arms test the read variable against
+   the numeric string values `"1"`, `"2"`, etc.
+
+### Widget selection
+
+| Number of menu choices | Input kind |
+|------------------------|------------|
+| ≤ 4 | `radio` — one radio button per choice |
+| ≥ 5 | `select` — a `<select>` dropdown |
+
+The `menu_input_kind/2` predicate performs this selection.
+
+### Public API
+
+```prolog
+is_menu_checkpoint(+Checkpoint, +VarNames, -MenuChoices:list)
+    % True when Checkpoint represents a numbered menu.
+    % MenuChoices is a list of menu_choice(Value, Label) terms.
+
+menu_input_kind(+N:integer, -Kind:atom)
+    % Determine radio vs select based on the number of choices N.
+```
+
+---
+
+## Stage 11 — Web Support Library (`src/web_support.pl`)
+
+### Purpose
+
+Stage 11 provides a self-contained SWI-Prolog module that packages all the
+runtime helper predicates required by generated web programs.  Generated
+programs may either:
+
+- **Inline helpers** — `emit_html_helpers/1` (from `html_output.pl`) copies
+  the definitions verbatim into the generated file, making it fully
+  self-contained.
+- **Load the module** — `:- use_module(web_support).` resolves helpers at
+  load time and keeps the generated file lean.
+
+The two forms are semantically equivalent at runtime.
+
+See [`docs/web_support_helpers.md`](web_support_helpers.md) for the full
+predicate reference.
+
+---
+
+## Stage 12 — CLI Entrypoint (`src/vetusia_converter.pl`)
+
+### Purpose
+
+Stage 12 wraps the Stage 5 `generate_web_server/2-3` API in a command-line
+interface so the converter can be invoked directly from a shell without
+starting a Prolog REPL.
+
+### Usage
+
+```bash
+swipl -q -g main -s src/vetusia_converter.pl -- <input.pl> -o <output.pl> [options]
+```
+
+### Option parsing
+
+The `main/0` predicate in `vetusia_converter.pl`:
+
+1. Reads `current_prolog_flag(argv, Args)` for the raw argument list.
+2. Strips leading SWI-Prolog flags and locates the `--` separator.
+3. Parses the remaining arguments for `-o`, `--port`, `--root`, `--state-mode`,
+   and `--help`.
+4. Calls `generate_web_server/3` with the parsed input file, output file, and
+   port, then calls `halt(0)`.
+5. On any error (missing required arguments, unreadable input file, conversion
+   failure), prints a message to stderr and calls `halt(1)`.
+
+### Public API
+
+```prolog
+main/0
+    % CLI entry point.  Reads argv, parses options, runs conversion, halts.
+```
+
+---
+
+## Extension Points
+
+### Adding new output-goal patterns
+
+Add a clause to `is_output_goal/1` in `src/reader.pl` and a matching clause
+to `norm_output_to_html_term/2` (form page) and `norm_output_to_result_call/2`
+(result page) in `src/html_output.pl`.
+
+### Adding new input predicates
+
+Extend `normalise_body/2` in `src/reader.pl` to tag the new predicate with a
+new `norm_*` term.  Then extend `is_input_goal/3` in
+`src/checkpoint_detector.pl` to recognise the new tag as a checkpoint.
+
+### Handling auxiliary predicates
+
+Non-main, non-directive clauses from the input are passed through unchanged
+by `wsg_emit_aux_clauses/2` in `src/web_server_generator.pl`.  They appear
+at the bottom of the generated file and can be called from any handler step.
+
+### Adding new widget kinds
+
+Add a new `InputKind` atom, extend `form_input_kind/2` in
+`src/form_generator.pl` to detect when the new kind applies, and add a
+matching clause to the HTML term emitter.
+
+---
+
+## Cross-Reference: Source Pattern → Architecture Path
+
+| Source construct | Stage 2 tag | Stage 3 action | Stage 4 response | Generated HTML |
+|------------------|-------------|----------------|------------------|---------------|
+| `read_string/5` | `norm_read_string` | checkpoint | `form_resp` | `<input type=text>` |
+| `read_password/1-2` | `norm_read_password` | checkpoint | `form_resp` | `<input type=password>` |
+| `writeln/1` (before read) | `norm_output` | prompt list | `form_resp.Prompts` | `<p>` |
+| `writeln/1` (result) | `norm_output` | result goal | `result_resp.Goals` | `html_writeln` |
+| `format/2` (result) | `norm_output` | result goal | `result_resp.Goals` | `format/2` verbatim |
+| `(A, B)` | `norm_conj` | recurse both | sequential steps | sequential calls |
+| `(C -> T ; E)` | `norm_if_then_else` | branch checkpoints | `cond_resp` | `(C -> ... ; ...)` |
+| `(A ; B)` | `norm_disj` | branch checkpoints | `cond_resp` | `(... ; ...)` |
+| Numbered menu | `norm_output` + `norm_read_string` | Stage 9 detection | `menu_resp` | radio / select |
+| Recursive retry | `norm_goal(main)` in else arm | `loop(F/A)` context | `retry_resp` | `http_redirect` |
+| Pure computation | `norm_goal` | pre-goal | `PreGoals` list | verbatim call |
+| Auxiliary clause | `norm_clause` (non-main) | skipped | `wsg_emit_aux_clauses` | verbatim clause |
+| Directive | `directive` | passed through | boilerplate section | `:- Goal.` |
