@@ -44,7 +44,41 @@ Download the installer from <https://www.swi-prolog.org/Download.html>.
 
 ## Quick Start
 
-### One-command conversion (Stage 5 — full pipeline)
+### CLI (Stage 12 — recommended)
+
+Convert using the CLI entrypoint (`src/vetusia_converter.pl`):
+
+```bash
+# Basic conversion (port defaults to 8080)
+swipl -q -g main -s src/vetusia_converter.pl -- examples/input_example.pl -o output/web_example.pl
+
+# Custom port
+swipl -q -g main -s src/vetusia_converter.pl -- examples/input_example.pl -o output/web_example.pl --port 9090
+
+# All options
+swipl -q -g main -s src/vetusia_converter.pl -- examples/input_example.pl -o output/web_example.pl \
+      --port 9090 --root myapp --state-mode hidden
+
+# Show help / usage
+swipl -q -g main -s src/vetusia_converter.pl -- --help
+```
+
+**CLI options**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `<input.pl>` | *(required)* | Terminal Prolog source file to convert |
+| `-o <output.pl>` | *(required)* | Output web Prolog server file |
+| `--port PORT` | `8080` | Default port for the generated server |
+| `--root PREFIX` | `.` | Root path prefix for HTTP handlers |
+| `--state-mode MODE` | `hidden` | State passing mode: `hidden` \| `url` \| `session` |
+| `--help` | | Show usage and exit |
+
+The converter exits **0** on success and **1** on any error (bad arguments,
+missing input file, or conversion failure), printing a clear error message
+to stderr.
+
+### One-command conversion (Stage 5 — Prolog API)
 
 ```bash
 swipl -g "use_module('src/web_server_generator'), \
@@ -152,6 +186,10 @@ step_2(Request) :-
 ## Running the Tests
 
 ```bash
+# Stage 12 — CLI entrypoint
+swipl -g "load_test_files([]), run_tests, halt" -t halt \
+      tests/test_vetusia_converter.pl
+
 # Stage 5 — web server generator
 swipl -g "load_test_files([]), run_tests, halt" -t halt \
       tests/test_web_server_generator.pl
@@ -176,6 +214,7 @@ vetusiapl2webpl/
 │   ├── checkpoint_detector.pl    ← Stage 3: web conversion point detector
 │   ├── continuation_extractor.pl ← Stage 4: continuation extraction engine
 │   ├── web_server_generator.pl   ← Stage 5: web server skeleton generator (entry point)
+│   ├── vetusia_converter.pl      ← Stage 12: CLI entrypoint
 │   └── vetusiapl2webpl.pl        ← original single-module converter (convert/2)
 ├── examples/
 │   ├── input_example.pl          ← sample terminal Prolog input
