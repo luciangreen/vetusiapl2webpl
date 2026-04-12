@@ -795,6 +795,262 @@ test(input_example_variables_threaded) :-
 :- end_tests(integration_input_example).
 
 % ==========================================================================
+% Tests: Stage 16 — new issue kinds (limitation / warning system)
+% ==========================================================================
+
+:- begin_tests(stage16_new_issue_kinds).
+
+%% arbitrary call/1 with variable goal produces arbitrary_call_chain issue.
+test(arbitrary_call_chain_var_goal) :-
+    Goal = _,
+    Body = norm_goal(call(Goal)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(arbitrary_call_chain, sequential, call(Goal))].
+
+%% call/1 with a compound (non-atom) goal produces arbitrary_call_chain issue.
+test(arbitrary_call_chain_compound_goal) :-
+    Body = norm_goal(call(foo(bar))),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(arbitrary_call_chain, sequential, call(foo(bar)))].
+
+%% call/1 with a plain atom is fully preserved — no issue.
+test(call_atom_goal_is_clean) :-
+    Body = norm_goal(call(foo)),
+    analyse_norm_body(Body, Issues),
+    Issues = [].
+
+%% assert/1 produces dynamic_database_mutation issue.
+test(assert_produces_db_mutation_issue) :-
+    Body = norm_goal(assert(fact(1))),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(dynamic_database_mutation, sequential, assert(fact(1)))].
+
+%% asserta/1 produces dynamic_database_mutation issue.
+test(asserta_produces_db_mutation_issue) :-
+    Body = norm_goal(asserta(fact(2))),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(dynamic_database_mutation, sequential, asserta(fact(2)))].
+
+%% assertz/1 produces dynamic_database_mutation issue.
+test(assertz_produces_db_mutation_issue) :-
+    Body = norm_goal(assertz(fact(3))),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(dynamic_database_mutation, sequential, assertz(fact(3)))].
+
+%% retract/1 produces dynamic_database_mutation issue.
+test(retract_produces_db_mutation_issue) :-
+    Body = norm_goal(retract(fact(_))),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(dynamic_database_mutation, sequential, retract(fact(_)))].
+
+%% retractall/1 produces dynamic_database_mutation issue.
+test(retractall_produces_db_mutation_issue) :-
+    Body = norm_goal(retractall(fact(_))),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(dynamic_database_mutation, sequential, retractall(fact(_)))].
+
+%% abolish/1 produces dynamic_database_mutation issue.
+test(abolish_produces_db_mutation_issue) :-
+    Body = norm_goal(abolish(fact/1)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(dynamic_database_mutation, sequential, abolish(fact/1))].
+
+%% open/3 produces complex_stream_manipulation issue.
+test(open_3_produces_stream_issue) :-
+    Body = norm_goal(open('file.txt', read, _S)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(complex_stream_manipulation, sequential, open('file.txt', read, _S))].
+
+%% open/4 produces complex_stream_manipulation issue.
+test(open_4_produces_stream_issue) :-
+    Body = norm_goal(open('file.txt', write, _S, [])),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(complex_stream_manipulation, sequential, open('file.txt', write, _S, []))].
+
+%% close/1 produces complex_stream_manipulation issue.
+test(close_produces_stream_issue) :-
+    Body = norm_goal(close(_S)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(complex_stream_manipulation, sequential, close(_S))].
+
+%% (=..)/2 produces runtime_generated_goal issue.
+test(univ_produces_runtime_generated_goal_issue) :-
+    Body = norm_goal(_T =.. _L),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(runtime_generated_goal, sequential, _)].
+
+%% halt/0 produces terminal_side_effects issue.
+test(halt_0_produces_terminal_side_effects_issue) :-
+    Body = norm_goal(halt),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(terminal_side_effects, sequential, halt)].
+
+%% halt/1 produces terminal_side_effects issue.
+test(halt_1_produces_terminal_side_effects_issue) :-
+    Body = norm_goal(halt(1)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(terminal_side_effects, sequential, halt(1))].
+
+%% sleep/1 produces terminal_side_effects issue.
+test(sleep_produces_terminal_side_effects_issue) :-
+    Body = norm_goal(sleep(5)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(terminal_side_effects, sequential, sleep(5))].
+
+%% nb_setval/2 produces terminal_side_effects issue.
+test(nb_setval_produces_terminal_side_effects_issue) :-
+    Body = norm_goal(nb_setval(key, val)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(terminal_side_effects, sequential, nb_setval(key, val))].
+
+%% nb_getval/2 produces terminal_side_effects issue.
+test(nb_getval_produces_terminal_side_effects_issue) :-
+    Body = norm_goal(nb_getval(key, _V)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(terminal_side_effects, sequential, nb_getval(key, _V))].
+
+%% b_setval/2 produces terminal_side_effects issue.
+test(b_setval_produces_terminal_side_effects_issue) :-
+    Body = norm_goal(b_setval(key, val)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(terminal_side_effects, sequential, b_setval(key, val))].
+
+%% b_getval/2 produces terminal_side_effects issue.
+test(b_getval_produces_terminal_side_effects_issue) :-
+    Body = norm_goal(b_getval(key, _V)),
+    analyse_norm_body(Body, Issues),
+    Issues = [issue(terminal_side_effects, sequential, b_getval(key, _V))].
+
+:- end_tests(stage16_new_issue_kinds).
+
+% ==========================================================================
+% Tests: Stage 16 — construct_preservation_class for new constructs
+% ==========================================================================
+
+:- begin_tests(stage16_preservation_classes).
+
+test(arbitrary_call_1_not_preserved) :-
+    construct_preservation_class(norm_goal(call(_)), Class),
+    Class = not_preserved(_).
+
+test(assert_not_preserved) :-
+    construct_preservation_class(norm_goal(assert(_)), Class),
+    Class = not_preserved(_).
+
+test(asserta_not_preserved) :-
+    construct_preservation_class(norm_goal(asserta(_)), Class),
+    Class = not_preserved(_).
+
+test(assertz_not_preserved) :-
+    construct_preservation_class(norm_goal(assertz(_)), Class),
+    Class = not_preserved(_).
+
+test(retract_not_preserved) :-
+    construct_preservation_class(norm_goal(retract(_)), Class),
+    Class = not_preserved(_).
+
+test(retractall_not_preserved) :-
+    construct_preservation_class(norm_goal(retractall(_)), Class),
+    Class = not_preserved(_).
+
+test(abolish_not_preserved) :-
+    construct_preservation_class(norm_goal(abolish(_)), Class),
+    Class = not_preserved(_).
+
+test(open_3_not_preserved) :-
+    construct_preservation_class(norm_goal(open(_, _, _)), Class),
+    Class = not_preserved(_).
+
+test(open_4_not_preserved) :-
+    construct_preservation_class(norm_goal(open(_, _, _, _)), Class),
+    Class = not_preserved(_).
+
+test(close_1_not_preserved) :-
+    construct_preservation_class(norm_goal(close(_)), Class),
+    Class = not_preserved(_).
+
+test(univ_not_preserved) :-
+    construct_preservation_class(norm_goal(_ =.. _), Class),
+    Class = not_preserved(_).
+
+test(halt_0_not_preserved) :-
+    construct_preservation_class(norm_goal(halt), Class),
+    Class = not_preserved(_).
+
+test(halt_1_not_preserved) :-
+    construct_preservation_class(norm_goal(halt(_)), Class),
+    Class = not_preserved(_).
+
+test(sleep_not_preserved) :-
+    construct_preservation_class(norm_goal(sleep(_)), Class),
+    Class = not_preserved(_).
+
+test(nb_setval_not_preserved) :-
+    construct_preservation_class(norm_goal(nb_setval(_, _)), Class),
+    Class = not_preserved(_).
+
+test(nb_getval_not_preserved) :-
+    construct_preservation_class(norm_goal(nb_getval(_, _)), Class),
+    Class = not_preserved(_).
+
+test(b_setval_not_preserved) :-
+    construct_preservation_class(norm_goal(b_setval(_, _)), Class),
+    Class = not_preserved(_).
+
+test(b_getval_not_preserved) :-
+    construct_preservation_class(norm_goal(b_getval(_, _)), Class),
+    Class = not_preserved(_).
+
+:- end_tests(stage16_preservation_classes).
+
+% ==========================================================================
+% Tests: Stage 16 — cf_issue_message for new issue kinds
+% ==========================================================================
+
+:- begin_tests(stage16_issue_messages).
+
+test(arbitrary_call_chain_message_is_atom) :-
+    cf_issue_message(issue(arbitrary_call_chain, sequential, call(_)), Msg),
+    atom(Msg).
+
+test(arbitrary_call_chain_message_mentions_unsupported) :-
+    cf_issue_message(issue(arbitrary_call_chain, sequential, call(_)), Msg),
+    ( sub_atom(Msg, _, _, _, 'UNSUPPORTED')
+    ; sub_atom(Msg, _, _, _, 'call') ), !.
+
+test(dynamic_database_mutation_message_is_atom) :-
+    cf_issue_message(issue(dynamic_database_mutation, sequential, assert(f)), Msg),
+    atom(Msg).
+
+test(dynamic_database_mutation_message_mentions_database) :-
+    cf_issue_message(issue(dynamic_database_mutation, sequential, assert(f)), Msg),
+    sub_atom(Msg, _, _, _, 'database').
+
+test(complex_stream_manipulation_message_is_atom) :-
+    cf_issue_message(issue(complex_stream_manipulation, sequential, open(f,r,_)), Msg),
+    atom(Msg).
+
+test(complex_stream_manipulation_message_mentions_stream) :-
+    cf_issue_message(issue(complex_stream_manipulation, sequential, close(_)), Msg),
+    ( sub_atom(Msg, _, _, _, 'stream')
+    ; sub_atom(Msg, _, _, _, 'Stream') ), !.
+
+test(runtime_generated_goal_message_is_atom) :-
+    cf_issue_message(issue(runtime_generated_goal, sequential, _T =.. _L), Msg),
+    atom(Msg).
+
+test(terminal_side_effects_message_is_atom) :-
+    cf_issue_message(issue(terminal_side_effects, sequential, halt), Msg),
+    atom(Msg).
+
+test(terminal_side_effects_message_mentions_http) :-
+    cf_issue_message(issue(terminal_side_effects, sequential, halt), Msg),
+    ( sub_atom(Msg, _, _, _, 'HTTP')
+    ; sub_atom(Msg, _, _, _, 'http') ), !.
+
+:- end_tests(stage16_issue_messages).
+
+% ==========================================================================
 % Helper: resolve path to examples/input_example.pl
 % ==========================================================================
 

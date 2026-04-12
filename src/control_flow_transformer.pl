@@ -83,12 +83,46 @@
  *       (e.g. call(Pred, Arg)) cannot be analysed.  They pass through
  *       unchanged and a warning is emitted.
  *
+ *   arbitrary call/1 chains (norm_goal containing call/1 with non-atom goal)
+ *       call(Goal) where Goal is a variable or a complex term constructed at
+ *       runtime cannot be statically analysed.  The goal passes through
+ *       unchanged; an UNSUPPORTED placeholder comment is emitted.
+ *
+ *   dynamic database mutation (assert/retract/abolish families)
+ *       Calls to assert/1, asserta/1, assertz/1, retract/1, retractall/1,
+ *       abolish/1 in the source program modify the in-process database.
+ *       These side effects are server-process-global and not scoped to any
+ *       HTTP session, making them unsafe in a web context.  The call passes
+ *       through unchanged; an UNSUPPORTED placeholder comment is emitted.
+ *
+ *   complex stream manipulation (open/close and stream-based I/O)
+ *       Calls to open/3-4, close/1, read/2, write/2, and related stream
+ *       predicates operate on file or pipe handles that are process-local
+ *       and cannot survive HTTP request boundaries.  The call passes
+ *       through unchanged; an UNSUPPORTED placeholder comment is emitted.
+ *
+ *   runtime-generated goals (=.. / functor / arg + call)
+ *       Goals constructed at runtime via (=..)/2, functor/3, or arg/3 and
+ *       then executed with call/1 cannot be statically analysed.  The
+ *       sequence passes through unchanged; an UNSUPPORTED placeholder
+ *       comment is emitted.
+ *
+ *   terminal-timing side effects (halt/sleep/nb_setval/nb_getval/global)
+ *       Calls to halt/0-1, sleep/1, nb_setval/2, nb_getval/2, b_setval/2,
+ *       b_getval/2, and similar predicates carry terminal-process semantics
+ *       that do not map to the stateless HTTP request/response model.  The
+ *       call passes through unchanged; an UNSUPPORTED placeholder comment
+ *       is emitted.
+ *
  * Issue term structure
  * --------------------
  *   issue(Kind, Context, Detail)
  *
  *   Kind    — one of: cut_sequential | cut_in_branch | exception_handling
  *                     | negation_as_failure | dynamic_meta_call
+ *                     | arbitrary_call_chain | dynamic_database_mutation
+ *                     | complex_stream_manipulation | runtime_generated_goal
+ *                     | terminal_side_effects
  *   Context — surrounding context atom (sequential | branch | menu | top)
  *   Detail  — additional Prolog term; for cut: norm_cut;
  *              for goals: the raw goal term
@@ -171,6 +205,46 @@ cf_issue_message(issue(dynamic_meta_call, Ctx, Goal),
         ['Dynamic meta-call in ', Ctx, ' context: ', GoalAtom,
          ' cannot be statically analysed; passes through unchanged.'],
         Msg).
+cf_issue_message(issue(arbitrary_call_chain, Ctx, Goal),
+    Msg) :-
+    term_to_atom(Goal, GoalAtom),
+    atomic_list_concat(
+        ['Arbitrary call/1 chain in ', Ctx, ' context: ', GoalAtom,
+         ' cannot be statically analysed; passes through unchanged.',
+         ' UNSUPPORTED — verify manually.'],
+        Msg).
+cf_issue_message(issue(dynamic_database_mutation, Ctx, Goal),
+    Msg) :-
+    term_to_atom(Goal, GoalAtom),
+    atomic_list_concat(
+        ['Dynamic database mutation in ', Ctx, ' context: ', GoalAtom,
+         ' modifies the global in-process database and is not session-scoped.',
+         ' UNSUPPORTED — behaviour is server-global, not per HTTP session.'],
+        Msg).
+cf_issue_message(issue(complex_stream_manipulation, Ctx, Goal),
+    Msg) :-
+    term_to_atom(Goal, GoalAtom),
+    atomic_list_concat(
+        ['Complex stream manipulation in ', Ctx, ' context: ', GoalAtom,
+         ' opens/reads/writes a file or pipe stream that cannot survive',
+         ' HTTP request boundaries. UNSUPPORTED — passes through unchanged.'],
+        Msg).
+cf_issue_message(issue(runtime_generated_goal, Ctx, Goal),
+    Msg) :-
+    term_to_atom(Goal, GoalAtom),
+    atomic_list_concat(
+        ['Runtime-generated goal in ', Ctx, ' context: ', GoalAtom,
+         ' constructs a goal at runtime and cannot be statically analysed.',
+         ' UNSUPPORTED — passes through unchanged.'],
+        Msg).
+cf_issue_message(issue(terminal_side_effects, Ctx, Goal),
+    Msg) :-
+    term_to_atom(Goal, GoalAtom),
+    atomic_list_concat(
+        ['Terminal-timing side effect in ', Ctx, ' context: ', GoalAtom,
+         ' carries process-level semantics incompatible with the HTTP',
+         ' request/response model. UNSUPPORTED — passes through unchanged.'],
+        Msg).
 
 %% todo_comment(+Issue, -TodoAtom) is det.
 %
@@ -215,6 +289,42 @@ construct_preservation_class(norm_goal(call(_, _)),
     not_preserved('Dynamic meta-calls cannot be statically analysed')).
 construct_preservation_class(norm_goal(call(_, _, _)),
     not_preserved('Dynamic meta-calls cannot be statically analysed')).
+construct_preservation_class(norm_goal(call(_)),
+    not_preserved('Arbitrary call/1 chains cannot be statically analysed')).
+construct_preservation_class(norm_goal(assert(_)),
+    not_preserved('Dynamic database mutation is server-global, not session-scoped')).
+construct_preservation_class(norm_goal(asserta(_)),
+    not_preserved('Dynamic database mutation is server-global, not session-scoped')).
+construct_preservation_class(norm_goal(assertz(_)),
+    not_preserved('Dynamic database mutation is server-global, not session-scoped')).
+construct_preservation_class(norm_goal(retract(_)),
+    not_preserved('Dynamic database mutation is server-global, not session-scoped')).
+construct_preservation_class(norm_goal(retractall(_)),
+    not_preserved('Dynamic database mutation is server-global, not session-scoped')).
+construct_preservation_class(norm_goal(abolish(_)),
+    not_preserved('Dynamic database mutation is server-global, not session-scoped')).
+construct_preservation_class(norm_goal(open(_, _, _)),
+    not_preserved('Stream handles cannot survive HTTP request boundaries')).
+construct_preservation_class(norm_goal(open(_, _, _, _)),
+    not_preserved('Stream handles cannot survive HTTP request boundaries')).
+construct_preservation_class(norm_goal(close(_)),
+    not_preserved('Stream handles cannot survive HTTP request boundaries')).
+construct_preservation_class(norm_goal(_ =.. _),
+    not_preserved('Runtime goal construction cannot be statically analysed')).
+construct_preservation_class(norm_goal(halt),
+    not_preserved('halt/0 terminates the process; incompatible with HTTP server')).
+construct_preservation_class(norm_goal(halt(_)),
+    not_preserved('halt/1 terminates the process; incompatible with HTTP server')).
+construct_preservation_class(norm_goal(sleep(_)),
+    not_preserved('sleep/1 blocks the process; incompatible with HTTP request model')).
+construct_preservation_class(norm_goal(nb_setval(_, _)),
+    not_preserved('nb_setval/2 sets global state; not session-scoped')).
+construct_preservation_class(norm_goal(nb_getval(_, _)),
+    not_preserved('nb_getval/2 reads global state; not session-scoped')).
+construct_preservation_class(norm_goal(b_setval(_, _)),
+    not_preserved('b_setval/2 sets backtrackable global state; not session-scoped')).
+construct_preservation_class(norm_goal(b_getval(_, _)),
+    not_preserved('b_getval/2 reads backtrackable global state; not session-scoped')).
 construct_preservation_class(norm_goal(_), fully_preserved).
 
 % ==========================================================================
@@ -270,6 +380,36 @@ walk_body(norm_goal(call(F, _)), Ctx, Issues) :-
 walk_body(norm_goal(call(F, _, _)), Ctx, Issues) :-
     var(F), !,
     Issues = [issue(dynamic_meta_call, Ctx, call(F, _, _))].
+
+% Arbitrary call/1 — variable or non-atom goal (runtime goal construction).
+walk_body(norm_goal(call(Goal)), Ctx, Issues) :-
+    ( var(Goal) ; \+ atom(Goal) ), !,
+    Issues = [issue(arbitrary_call_chain, Ctx, call(Goal))].
+
+% Dynamic database mutation.
+walk_body(norm_goal(assert(C)),    Ctx, [issue(dynamic_database_mutation, Ctx, assert(C))]) :- !.
+walk_body(norm_goal(asserta(C)),   Ctx, [issue(dynamic_database_mutation, Ctx, asserta(C))]) :- !.
+walk_body(norm_goal(assertz(C)),   Ctx, [issue(dynamic_database_mutation, Ctx, assertz(C))]) :- !.
+walk_body(norm_goal(retract(C)),   Ctx, [issue(dynamic_database_mutation, Ctx, retract(C))]) :- !.
+walk_body(norm_goal(retractall(C)),Ctx, [issue(dynamic_database_mutation, Ctx, retractall(C))]) :- !.
+walk_body(norm_goal(abolish(C)),   Ctx, [issue(dynamic_database_mutation, Ctx, abolish(C))]) :- !.
+
+% Complex stream manipulation.
+walk_body(norm_goal(open(F, M, S)),    Ctx, [issue(complex_stream_manipulation, Ctx, open(F,M,S))]) :- !.
+walk_body(norm_goal(open(F, M, S, O)), Ctx, [issue(complex_stream_manipulation, Ctx, open(F,M,S,O))]) :- !.
+walk_body(norm_goal(close(S)),         Ctx, [issue(complex_stream_manipulation, Ctx, close(S))]) :- !.
+
+% Runtime-generated goals via (=..)/2.
+walk_body(norm_goal(T =.. L), Ctx, [issue(runtime_generated_goal, Ctx, (T =.. L))]) :- !.
+
+% Terminal-timing side effects.
+walk_body(norm_goal(halt),        Ctx, [issue(terminal_side_effects, Ctx, halt)]) :- !.
+walk_body(norm_goal(halt(C)),     Ctx, [issue(terminal_side_effects, Ctx, halt(C))]) :- !.
+walk_body(norm_goal(sleep(N)),    Ctx, [issue(terminal_side_effects, Ctx, sleep(N))]) :- !.
+walk_body(norm_goal(nb_setval(K, V)), Ctx, [issue(terminal_side_effects, Ctx, nb_setval(K,V))]) :- !.
+walk_body(norm_goal(nb_getval(K, V)), Ctx, [issue(terminal_side_effects, Ctx, nb_getval(K,V))]) :- !.
+walk_body(norm_goal(b_setval(K, V)),  Ctx, [issue(terminal_side_effects, Ctx, b_setval(K,V))]) :- !.
+walk_body(norm_goal(b_getval(K, V)),  Ctx, [issue(terminal_side_effects, Ctx, b_getval(K,V))]) :- !.
 
 % All other goals (output, true, read, plain norm_goal) are clean.
 walk_body(_, _, []).
@@ -351,5 +491,55 @@ prolog:message(cf_issue(issue(dynamic_meta_call, Ctx, Goal))) -->
         ['[vetusiapl2webpl Stage 10] Dynamic meta-call (', GoalAtom,
          ') in ', Ctx, ' context: cannot be statically analysed.',
          ' Passes through unchanged.'],
+        Msg) },
+    [ Msg ].
+
+prolog:message(cf_issue(issue(arbitrary_call_chain, Ctx, Goal))) -->
+    { term_to_atom(Goal, GoalAtom),
+      atomic_list_concat(
+        ['[vetusiapl2webpl Stage 16] Arbitrary call/1 chain (', GoalAtom,
+         ') in ', Ctx, ' context: cannot be statically analysed.',
+         ' UNSUPPORTED — passes through unchanged.',
+         ' An UNSUPPORTED placeholder comment has been added to the generated code.'],
+        Msg) },
+    [ Msg ].
+
+prolog:message(cf_issue(issue(dynamic_database_mutation, Ctx, Goal))) -->
+    { term_to_atom(Goal, GoalAtom),
+      atomic_list_concat(
+        ['[vetusiapl2webpl Stage 16] Dynamic database mutation (', GoalAtom,
+         ') in ', Ctx, ' context: modifies the global in-process database.',
+         ' UNSUPPORTED — not session-scoped; behaviour is server-global.',
+         ' An UNSUPPORTED placeholder comment has been added to the generated code.'],
+        Msg) },
+    [ Msg ].
+
+prolog:message(cf_issue(issue(complex_stream_manipulation, Ctx, Goal))) -->
+    { term_to_atom(Goal, GoalAtom),
+      atomic_list_concat(
+        ['[vetusiapl2webpl Stage 16] Complex stream manipulation (', GoalAtom,
+         ') in ', Ctx, ' context: stream handles cannot survive HTTP request boundaries.',
+         ' UNSUPPORTED — passes through unchanged.',
+         ' An UNSUPPORTED placeholder comment has been added to the generated code.'],
+        Msg) },
+    [ Msg ].
+
+prolog:message(cf_issue(issue(runtime_generated_goal, Ctx, Goal))) -->
+    { term_to_atom(Goal, GoalAtom),
+      atomic_list_concat(
+        ['[vetusiapl2webpl Stage 16] Runtime-generated goal (', GoalAtom,
+         ') in ', Ctx, ' context: cannot be statically analysed.',
+         ' UNSUPPORTED — passes through unchanged.',
+         ' An UNSUPPORTED placeholder comment has been added to the generated code.'],
+        Msg) },
+    [ Msg ].
+
+prolog:message(cf_issue(issue(terminal_side_effects, Ctx, Goal))) -->
+    { term_to_atom(Goal, GoalAtom),
+      atomic_list_concat(
+        ['[vetusiapl2webpl Stage 16] Terminal-timing side effect (', GoalAtom,
+         ') in ', Ctx, ' context: incompatible with the HTTP request/response model.',
+         ' UNSUPPORTED — passes through unchanged.',
+         ' An UNSUPPORTED placeholder comment has been added to the generated code.'],
         Msg) },
     [ Msg ].

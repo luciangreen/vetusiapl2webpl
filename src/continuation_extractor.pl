@@ -3,7 +3,9 @@
     write_cont_steps/3,
     write_cont_step/3,
     cont_step_name/2,
-    cont_step_name/3
+    cont_step_name/3,
+    collect_unsupported_messages/2,
+    norm_goal_to_raw/2
 ]).
 
 /** <module> continuation_extractor — Stage 4: Continuation Extraction Engine
@@ -229,6 +231,10 @@ gen_cont_steps([CP | RestCPs], VN, Head, [Step | RestSteps]) :-
     compile_cont_body(RemBody, LiveVars, ContCPs, VN, Head, Response0),
     % Move any trailing compute goals that ended up in result_resp into PreGoals.
     ce_extract_result_compute_goals(Response0, PreGoals0, PreGoals, Response),
+    % Stage 16: analyse PreGoals for unsupported constructs and warn on terminal.
+    maplist(analyse_norm_body, PreGoals, IssueLists),
+    flatten(IssueLists, Issues),
+    warn_cf_issues(Issues),
     Step = cont_step(StepName, LiveVars, PreGoals, Response),
     gen_cont_steps(RestCPs, VN, Head, RestSteps).
 
@@ -552,6 +558,10 @@ write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) 
     % Stage 10: emit TODO comments for any approximately-preserved constructs.
     collect_todo_messages(Response, TodoMsgs),
     maplist(emit_todo_comment(Out), TodoMsgs),
+    % Stage 16: emit UNSUPPORTED comments for not-preserved constructs found
+    % in PreGoals (compute goals that passed through from the source program).
+    collect_unsupported_messages(PreGoals, UnsupportedMsgs),
+    maplist(emit_unsupported_comment(Out), UnsupportedMsgs),
     % write_term preserves variable names from ExtVN.
     write_term(Out, Clause, [variable_names(ExtVN), quoted(true)]),
     format(Out, ".~n", []).
@@ -782,6 +792,41 @@ collect_todo_messages(_, []).
 %  Write a TODO comment line to the output stream Out.
 emit_todo_comment(Out, Message) :-
     format(Out, "%% TODO: ~w~n", [Message]).
+
+% ==========================================================================
+% Internal: Stage 16 — UNSUPPORTED comment helpers
+% ==========================================================================
+
+%% collect_unsupported_messages(+PreGoals, -Messages) is det.
+%
+%  Walk the PreGoals list (list of norm_goal/1 terms) and collect a
+%  human-readable message for every goal whose construct_preservation_class
+%  is not_preserved.  Messages is a list of atoms (one per not-preserved goal).
+collect_unsupported_messages([], []).
+collect_unsupported_messages([G | Rest], Msgs) :-
+    ( construct_preservation_class(G, not_preserved(Reason)) ->
+        norm_goal_to_raw(G, RawGoal),
+        term_to_atom(RawGoal, GoalAtom),
+        atomic_list_concat(['Goal ', GoalAtom, ' — ', Reason,
+                            ' — passes through unchanged; verify manually.'],
+                           Msg),
+        collect_unsupported_messages(Rest, RestMsgs),
+        Msgs = [Msg | RestMsgs]
+    ;   collect_unsupported_messages(Rest, Msgs)
+    ).
+
+%% norm_goal_to_raw(+NormGoal, -RawGoal) is det.
+%
+%  Extract the raw goal term from a norm_goal/1 wrapper.
+%  Returns the norm term unchanged for non-norm_goal constructs.
+norm_goal_to_raw(norm_goal(G), G) :- !.
+norm_goal_to_raw(G, G).
+
+%% emit_unsupported_comment(+Out, +Message) is det.
+%
+%  Write an UNSUPPORTED comment line to the output stream Out.
+emit_unsupported_comment(Out, Message) :-
+    format(Out, "%% UNSUPPORTED: ~w~n", [Message]).
 
 %% emit_step_comment(+Out, +StepName, +RecvVarNames) is det.
 %
