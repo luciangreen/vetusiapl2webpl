@@ -17,6 +17,7 @@ The compiler is organised into four stages:
 | **Stage 4** | `src/continuation_extractor.pl` | Extract continuations from checkpoints; generate cont_step/4 terms and emit handler clauses |
 | **Stage 5** | `src/web_server_generator.pl` | Tie together the full pipeline and emit a complete, runnable SWI-Prolog HTTP server program |
 | **Stage 6** | `src/html_output.pl` | Convert terminal-output goals into HTML output calls; provide runtime helper predicates for generated programs |
+| **Stage 10** | `src/control_flow_transformer.pl` | Analyse normalised bodies for control-flow issues; emit warnings and TODO markers for constructs that cannot be fully preserved |
 
 ---
 
@@ -501,3 +502,103 @@ Extend `is_input_goal/3` in `src/checkpoint_detector.pl` (Stage 3) and
 `split_at_reads_/4` in `src/vetusiapl2webpl.pl` (Stage 4+) to recognise
 additional input predicates (e.g. `read_term/2`, `read/1`) alongside
 `read_string/5`.
+
+---
+
+## Stage 10 — Control Flow Preservation (`src/control_flow_transformer.pl`)
+
+### Purpose
+
+Stage 10 analyses normalised Prolog bodies for control-flow constructs that
+require special handling during web conversion.  It classifies every
+construct by how faithfully its semantics are preserved, collects *issues*
+(problematic patterns), emits `print_message` warnings, and provides helpers
+for embedding TODO comments in generated code.
+
+### Preservation semantics
+
+| Construct | Normalised form | Preservation | Notes |
+|-----------|-----------------|--------------|-------|
+| Conjunction | `norm_conj` | **Fully preserved** | Goal order maintained |
+| Disjunction | `norm_disj` | **Fully preserved** | Each arm becomes a cond_resp branch |
+| If-then-else | `norm_if_then_else` | **Fully preserved** | Mapped to `(Cond -> Then ; Else)` |
+| If-then | `norm_if_then` | **Fully preserved** | Mapped to `(Cond -> Then)` with empty else |
+| Recursion / retry | `norm_goal(F/A)` matching ClauseHead | **Fully preserved** | Compiled to `retry_resp(step_0)` — HTTP redirect |
+| True / empty | `norm_true` | **Fully preserved** | Trivially no-op |
+| Output | `norm_output` | **Fully preserved** | Converted to HTML calls |
+| Cut (sequential) | `norm_cut` in straight-line context | **Approximately preserved** | Cut has no effect in HTTP handlers (no choice points); TODO emitted |
+| Cut (in branch) | `norm_cut` inside disj/if-then arm | **Approximately preserved** | Preserved syntactically; cross-branch escape semantics cannot be verified; TODO emitted |
+| Exception handling | `norm_goal(catch/throw)` | **Not preserved** | Passes through; interaction with HTTP server is unverified; warning emitted |
+| Negation as failure | `norm_goal(\+G)` | **Approximately preserved** | Safe only when G is a pure test; warning emitted for impure G |
+| Dynamic meta-calls | `norm_goal(call(Pred, ...))` with var Pred | **Not preserved** | Cannot be statically analysed; passes through; warning emitted |
+
+### Issue term structure
+
+```prolog
+issue(Kind, Context, Detail)
+```
+
+| Field | Meaning |
+|-------|---------|
+| `Kind` | `cut_sequential` \| `cut_in_branch` \| `exception_handling` \| `negation_as_failure` \| `dynamic_meta_call` |
+| `Context` | `sequential` \| `branch` \| `menu` — the surrounding control-flow context |
+| `Detail` | The problematic term (e.g. `norm_cut`, the `catch/3` goal, etc.) |
+
+### TODO response term
+
+When the continuation of a checkpoint compiles to a body that can only be
+approximately preserved, `compile_cont_body` wraps the result in a
+`todo_resp/2` term:
+
+```prolog
+todo_resp(Message, FallbackResponse)
+```
+
+`write_cont_step/3` detects `todo_resp` nodes in the response tree and
+emits a `%% TODO: Message` comment **before** the generated clause so that
+developers can identify and review the affected handlers.
+
+### Public API
+
+```prolog
+analyse_norm_body(+NormBody, -Issues)
+    % Walk NormBody and collect all control-flow issues.
+
+warn_cf_issues(+Issues)
+    % Emit print_message(warning, ...) for each issue.
+
+has_cf_issues(+NormBody)
+    % Semidet: true when NormBody contains at least one issue.
+
+cf_issue_message(+Issue, -MessageAtom)
+    % Human-readable description of an issue.
+
+todo_comment(+Issue, -TodoAtom)
+    % Generate a "%% TODO: ..." comment atom for an issue.
+
+construct_preservation_class(+NormBodyTerm, -Class)
+    % Classify one normalised body term as:
+    %   fully_preserved | approximately_preserved(Reason) | not_preserved(Reason)
+```
+
+### Integration with Stage 4
+
+`continuation_extractor.pl` calls `analyse_norm_body/2` and
+`warn_cf_issues/1` at the start of `extract_continuations/4` so that
+warnings are printed before any handler code is generated.
+
+`collect_pre_goals/3` now collects `norm_cut` in sequential pre-goal
+position so that cuts in straight-line continuations are preserved as `!`
+in the generated handler body.
+
+`compile_cont_body/6` wraps a bare `norm_cut` continuation in `todo_resp/2`
+instead of silently discarding it.
+
+### File layout
+
+```
+src/
+  control_flow_transformer.pl   ← Stage 10 (new)
+tests/
+  test_control_flow_transformer.pl  ← Stage 10 plunit test suite (new)
+```

@@ -80,6 +80,7 @@
 :- use_module(form_generator).
 :- use_module(state_serialiser).
 :- use_module(menu_recogniser).
+:- use_module(control_flow_transformer).
 
 % ==========================================================================
 % Public API
@@ -105,10 +106,20 @@ cont_step_name(N, Name) :-
 %                continuation bodies are recognised as retry loops and
 %                compiled to retry_resp(step_0).
 %  Steps       — result: list of cont_step/4 terms
+%
+%  Stage 10: Each checkpoint's continuation is analysed for control-flow
+%  issues before step generation.  Warnings are printed for unsupported
+%  constructs and TODO markers are embedded in the generated code for
+%  approximately-preserved constructs (e.g. cut).
 extract_continuations([], _VN, _Head, []) :- !.
 extract_continuations(Checkpoints, VN, Head, Steps) :-
     Checkpoints = [FirstCP | _],
-    FirstCP = checkpoint(_, FirstKind, FirstVarName, FirstPrompts, _, FirstLiveVars, _),
+    FirstCP = checkpoint(_, FirstKind, FirstVarName, FirstPrompts,
+                         FirstCont, FirstLiveVars, _),
+    % Stage 10: analyse the first continuation for control-flow issues and
+    % emit any necessary warnings before code generation begins.
+    analyse_norm_body(FirstCont, FirstIssues),
+    warn_cf_issues(FirstIssues),
     % step_0: entry GET handler — no parameters received.
     % The hidden vars for the form = LiveVars of FirstCP minus FirstVarName
     % (those are carried forward to step_1; but step_1 = FirstCP's step, and
@@ -173,12 +184,18 @@ gen_cont_steps([CP | RestCPs], VN, Head, [Step | RestSteps]) :-
 
 %% collect_pre_goals(+NormBody, -PreGoals, -RemBody) is det.
 %
-%  Walk NormBody left-to-right collecting leading norm_goal/1 goals into
-%  PreGoals (these are compute goals to execute before rendering HTML).
-%  norm_output/1 goals are skipped silently — they are already captured in
-%  the next checkpoint's Prompts field and will be emitted there.
-%  Stops at the first norm_read_*, norm_if_then_else, norm_disj, or norm_if_then.
+%  Walk NormBody left-to-right collecting leading norm_goal/1 and norm_cut
+%  goals into PreGoals (these are compute goals to execute before rendering
+%  HTML).  norm_output/1 goals are skipped silently — they are already
+%  captured in the next checkpoint's Prompts field and will be emitted there.
+%  Stops at the first norm_read_*, norm_if_then_else, norm_disj, or
+%  norm_if_then.
+%
+%  Stage 10: norm_cut is collected as a pre-goal so that a cut in sequential
+%  context is preserved in the generated handler's computation prefix.
 collect_pre_goals(norm_conj(norm_goal(G), Rest), [norm_goal(G) | More], RemBody) :- !,
+    collect_pre_goals(Rest, More, RemBody).
+collect_pre_goals(norm_conj(norm_cut, Rest), [norm_cut | More], RemBody) :- !,
     collect_pre_goals(Rest, More, RemBody).
 collect_pre_goals(norm_conj(norm_output(_), Rest), Goals, RemBody) :- !,
     collect_pre_goals(Rest, Goals, RemBody).
@@ -197,15 +214,20 @@ collect_pre_goals(Body, [], Body).
 %  ContCPs  — checkpoints within RemBody (positional slice of RestCPs)
 %  VN       — Name=Var association list
 %  Head     — F/A or none (for retry detection)
-%  Response — form_resp | result_resp | cond_resp | retry_resp
+%  Response — form_resp | result_resp | cond_resp | retry_resp | todo_resp
 
 % Empty / true body → result page with nothing to show.
 compile_cont_body(norm_true, LiveVars, _ContCPs, _VN, _Head,
                   result_resp([], LiveVars)) :- !.
 
-% norm_cut (bare cut) → treat as empty result.
+% norm_cut as the entire remaining body: in the web context there are no
+% choice points, so the cut has no observable effect.  Return an empty
+% result page wrapped in a todo_resp so that a TODO comment is emitted in
+% the generated source, alerting the developer that cut semantics differ.
+% Stage 10: approximately preserved — emit TODO marker.
 compile_cont_body(norm_cut, LiveVars, _ContCPs, _VN, _Head,
-                  result_resp([], LiveVars)) :- !.
+                  todo_resp('Cut (!) in continuation: no choice points exist in HTTP handlers; cut has no observable effect.',
+                            result_resp([], LiveVars))) :- !.
 
 % If-then-else at the top level of the continuation.
 compile_cont_body(norm_if_then_else(Cond, Then, Else), LiveVars, ContCPs, VN, Head,
@@ -403,6 +425,11 @@ emit_ce_server_init(Out) :-
 %    Prolog term (Name).  For each hidden field in the response, a "serial"
 %    counterpart (e.g. Name_s) is produced by state_serialise/2 and used as
 %    the hidden field value so that complex terms survive the round-trip.
+%
+%  Stage 10: Before writing the clause, any todo_resp nodes in Response are
+%  scanned and their TODO messages are emitted as %% TODO: comments in the
+%  generated source so that developers can identify constructs that were not
+%  fully preserved.
 write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) :-
     % Request variable: underscore-prefixed for step_0 (never used),
     % plain for all POST steps (passed to http_parameters/2 and http_redirect/3).
@@ -445,6 +472,9 @@ write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) 
     Head =.. [StepName, ReqVar],
     Clause = (Head :- Body),
     nl(Out),
+    % Stage 10: emit TODO comments for any approximately-preserved constructs.
+    collect_todo_messages(Response, TodoMsgs),
+    maplist(emit_todo_comment(Out), TodoMsgs),
     % write_term preserves variable names from ExtVN.
     write_term(Out, Clause, [variable_names(ExtVN), quoted(true)]),
     format(Out, ".~n", []).
@@ -505,6 +535,8 @@ build_deserialise_goals([VarName | Rest], VN, RawPairs,
 %
 %  Collect the union of all HiddenVarNames from every form_resp / menu_resp
 %  node in the response tree.
+%
+%  Stage 10: todo_resp delegates to its fallback response.
 collect_response_hidden_vars(form_resp(_, _, HiddenVarNames, _, _),
                              HiddenVarNames) :- !.
 collect_response_hidden_vars(menu_resp(_, _, _, HiddenVarNames, _, _),
@@ -514,6 +546,8 @@ collect_response_hidden_vars(cond_resp(_, ThenResp, ElseResp), All) :- !,
     collect_response_hidden_vars(ElseResp, ElseH),
     append(ThenH, ElseH, All0),
     list_to_set(All0, All).
+collect_response_hidden_vars(todo_resp(_, FallbackResp), All) :- !,
+    collect_response_hidden_vars(FallbackResp, All).
 collect_response_hidden_vars(_, []).
 
 %% make_hidden_to_serial_entry(+SerialPairs, +VarName, -Entry) is det.
@@ -641,6 +675,36 @@ response_to_goal(retry_resp(TargetStep), ReqVar, _VN, _SerialPairs, Goal) :-
     ;   atom_concat('/', TargetStep, Path),
         Goal = http_redirect(see_other, root(Path), ReqVar)
     ).
+
+% Stage 10: todo_resp — delegate to the fallback response for goal generation.
+% The TODO comment itself is emitted as a Prolog comment by write_cont_step
+% (via collect_todo_messages/2 + emit_todo_comment/2) before the clause is
+% written, not as a runtime goal in the clause body.
+response_to_goal(todo_resp(_Reason, FallbackResp), ReqVar, VN,
+                 SerialPairs, Goal) :-
+    response_to_goal(FallbackResp, ReqVar, VN, SerialPairs, Goal).
+
+% ==========================================================================
+% Internal: Stage 10 — TODO comment helpers
+% ==========================================================================
+
+%% collect_todo_messages(+Response, -Messages) is det.
+%
+%  Recursively collect all TODO message atoms from todo_resp nodes in the
+%  response tree.  Messages is a list of atoms (one per todo_resp node).
+collect_todo_messages(todo_resp(Reason, FallbackResp), [Reason | Rest]) :- !,
+    collect_todo_messages(FallbackResp, Rest).
+collect_todo_messages(cond_resp(_, ThenResp, ElseResp), Msgs) :- !,
+    collect_todo_messages(ThenResp, ThenMsgs),
+    collect_todo_messages(ElseResp, ElseMsgs),
+    append(ThenMsgs, ElseMsgs, Msgs).
+collect_todo_messages(_, []).
+
+%% emit_todo_comment(+Out, +Message) is det.
+%
+%  Write a TODO comment line to the output stream Out.
+emit_todo_comment(Out, Message) :-
+    format(Out, "%% TODO: ~w~n", [Message]).
 
 % ==========================================================================
 % Internal: HTML / output helpers
