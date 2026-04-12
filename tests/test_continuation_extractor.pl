@@ -544,6 +544,54 @@ read_all_lines(S, Lines) :-
 :- end_tests(write_cont_steps_integration).
 
 % ==========================================================================
+% Tests: Stage 16 — collect_unsupported_messages/2
+% ==========================================================================
+
+:- begin_tests(stage16_collect_unsupported).
+
+%% Empty PreGoals → empty messages.
+test(empty_pregoals_no_messages) :-
+    continuation_extractor:collect_unsupported_messages([], Msgs),
+    Msgs = [].
+
+%% A clean goal (norm_goal with a plain call) produces no message.
+test(clean_goal_no_message) :-
+    continuation_extractor:collect_unsupported_messages([norm_goal(foo(1))], Msgs),
+    Msgs = [].
+
+%% norm_goal(assert(_)) is not_preserved → one message.
+test(assert_goal_produces_message) :-
+    continuation_extractor:collect_unsupported_messages(
+        [norm_goal(assert(fact(1)))], Msgs),
+    length(Msgs, 1).
+
+%% The message for assert is an atom.
+test(assert_message_is_atom) :-
+    continuation_extractor:collect_unsupported_messages(
+        [norm_goal(assert(fact(1)))], [Msg]),
+    atom(Msg).
+
+%% norm_goal(halt) is not_preserved → one message.
+test(halt_goal_produces_message) :-
+    continuation_extractor:collect_unsupported_messages(
+        [norm_goal(halt)], Msgs),
+    length(Msgs, 1).
+
+%% Two not-preserved goals → two messages.
+test(two_unsupported_goals_two_messages) :-
+    continuation_extractor:collect_unsupported_messages(
+        [norm_goal(halt), norm_goal(assert(x))], Msgs),
+    length(Msgs, 2).
+
+%% Mixed: one clean + one not-preserved → one message.
+test(mixed_goals_one_message) :-
+    continuation_extractor:collect_unsupported_messages(
+        [norm_goal(foo), norm_goal(nb_setval(k, v))], Msgs),
+    length(Msgs, 1).
+
+:- end_tests(stage16_collect_unsupported).
+
+% ==========================================================================
 % Helpers used by the integration tests
 % ==========================================================================
 
