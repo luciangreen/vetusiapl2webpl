@@ -27,12 +27,22 @@
  *
  * Response terms
  * --------------
- *   form_resp(Prompts, InputVarName, HiddenVarNames, NextStep)
- *       Render an HTML form.
+ *   form_resp(Prompts, InputVarName, HiddenVarNames, NextStep, InputKind)
+ *       Render an HTML form with a text/password/textarea input.
  *       Prompts        — list of norm_output/1 goals shown on the form page
  *       InputVarName   — atom: the text-input field name (variable being read)
  *       HiddenVarNames — list of atom names to carry forward as hidden fields
  *       NextStep       — atom: the next handler name
+ *       InputKind      — text | password | textarea
+ *
+ *   menu_resp(Prompts, VarName, Choices, HiddenVarNames, NextStep, InputKind)
+ *       Render an HTML form for a numbered menu selection.
+ *       Prompts        — list of norm_output/1 goals shown above the menu
+ *       VarName        — atom: the form field name for the choice
+ *       Choices        — list of menu_choice(Value, Label) terms
+ *       HiddenVarNames — list of atom names to carry forward as hidden fields
+ *       NextStep       — atom: the next handler name
+ *       InputKind      — radio | select | buttons
  *
  *   result_resp(Goals, LiveVars)
  *       Render a final result page.
@@ -69,6 +79,7 @@
 :- use_module(html_output).
 :- use_module(form_generator).
 :- use_module(state_serialiser).
+:- use_module(menu_recogniser).
 
 % ==========================================================================
 % Public API
@@ -105,10 +116,17 @@ extract_continuations(Checkpoints, VN, Head, Steps) :-
     %  HiddenVars0 is typically empty).
     exclude(==(FirstVarName), FirstLiveVars, HiddenVars0),
     cont_step_name(1, FirstNextStep),
-    select_input_type(FirstKind, FirstVarName, FirstPrompts, FirstInputType),
-    Step0 = cont_step(step_0, [], [],
-                      form_resp(FirstPrompts, FirstVarName, HiddenVars0,
-                                FirstNextStep, FirstInputType)),
+    % Stage 9: use menu_resp when the first checkpoint is a menu pattern.
+    ( is_menu_checkpoint(FirstCP, VN, FirstChoices, _FirstInvalidAction) ->
+        menu_input_kind(FirstChoices, FirstMenuInputKind),
+        Step0Resp = menu_resp(FirstPrompts, FirstVarName, FirstChoices,
+                              HiddenVars0, FirstNextStep, FirstMenuInputKind)
+    ;
+        select_input_type(FirstKind, FirstVarName, FirstPrompts, FirstInputType),
+        Step0Resp = form_resp(FirstPrompts, FirstVarName, HiddenVars0,
+                              FirstNextStep, FirstInputType)
+    ),
+    Step0 = cont_step(step_0, [], [], Step0Resp),
     % Generate steps 1..N from each checkpoint.
     gen_cont_steps(Checkpoints, VN, Head, ContSteps),
     Steps = [Step0 | ContSteps].
@@ -230,17 +248,24 @@ compile_cont_body(NormBody, _LiveVars, _ContCPs, _VN, Head,
     \+ contains_read_in_body(NormBody),
     ce_body_has_call(NormBody, F, A), !.
 
-% Body contains at least one read — generate form_resp using the first
-% remaining checkpoint (ContCPs head) to get the prompts and input var.
-compile_cont_body(NormBody, _LiveVars, [NextCP | _], _VN, _Head,
-                  form_resp(Prompts, InputVarName, HiddenVarNames,
-                            NextStep, InputKind)) :-
+% Body contains at least one read — generate form_resp (or menu_resp for
+% menu patterns) using the first remaining checkpoint (ContCPs head).
+compile_cont_body(NormBody, _LiveVars, [NextCP | _], VN, _Head, Response) :-
     contains_read_in_body(NormBody), !,
     NextCP = checkpoint(Id, Kind, InputVarName, Prompts, _, NextLiveVars, _),
     % Hidden vars = what step_{Id} receives minus the var it is about to read.
     exclude(==(InputVarName), NextLiveVars, HiddenVarNames),
     cont_step_name(Id, NextStep),
-    select_input_type(Kind, InputVarName, Prompts, InputKind).
+    % Stage 9: use menu_resp when the next checkpoint is a menu pattern.
+    ( is_menu_checkpoint(NextCP, VN, Choices, _InvalidAction) ->
+        menu_input_kind(Choices, MenuInputKind),
+        Response = menu_resp(Prompts, InputVarName, Choices,
+                             HiddenVarNames, NextStep, MenuInputKind)
+    ;
+        select_input_type(Kind, InputVarName, Prompts, InputKind),
+        Response = form_resp(Prompts, InputVarName, HiddenVarNames,
+                             NextStep, InputKind)
+    ).
 
 % Terminal body with no reads and no retry — result page.
 compile_cont_body(NormBody, LiveVars, _ContCPs, _VN, _Head,
@@ -478,9 +503,11 @@ build_deserialise_goals([VarName | Rest], VN, RawPairs,
 
 %% collect_response_hidden_vars(+Response, -HiddenVarNames) is det.
 %
-%  Collect the union of all HiddenVarNames from every form_resp node in
-%  the response tree (form_resp, cond_resp branches, etc.).
+%  Collect the union of all HiddenVarNames from every form_resp / menu_resp
+%  node in the response tree.
 collect_response_hidden_vars(form_resp(_, _, HiddenVarNames, _, _),
+                             HiddenVarNames) :- !.
+collect_response_hidden_vars(menu_resp(_, _, _, HiddenVarNames, _, _),
                              HiddenVarNames) :- !.
 collect_response_hidden_vars(cond_resp(_, ThenResp, ElseResp), All) :- !,
     collect_response_hidden_vars(ThenResp, ThenH),
@@ -539,8 +566,8 @@ norm_goal_to_call(G, G).
 %  in a handler clause body.
 %
 %  SerialPairs — list of 'Name_s' = SerVar pairs created in write_cont_step.
-%    For form_resp: serial variables are used as hidden field values, and
-%    state_serialise/2 goals are prepended to the form goal.
+%    For form_resp / menu_resp: serial variables are used as hidden field
+%    values, and state_serialise/2 goals are prepended to the form goal.
 %    For other response types: SerialPairs is passed through but not used
 %    at the top level.
 response_to_goal(form_resp(Prompts, InputVarName, HiddenVarNames, NextStep,
@@ -553,6 +580,21 @@ response_to_goal(form_resp(Prompts, InputVarName, HiddenVarNames, NextStep,
     % Generate form using the serial VN so hidden fields carry serialised values.
     generate_form(Prompts, InputVarName, HiddenVarNames, NextStep,
                   InputKind, HiddenVN, Form),
+    FormGoal = reply_html_page(title('Form'), [Form]),
+    ce_goals_to_conj(SerialGoals, SerialConj),
+    ( SerialConj = true ->
+        Goal = FormGoal
+    ;   Goal = (SerialConj, FormGoal)
+    ).
+
+% Stage 9: menu_resp — generate a menu selection form.
+response_to_goal(menu_resp(Prompts, VarName, Choices, HiddenVarNames, NextStep,
+                           InputKind),
+                 _ReqVar, VN, SerialPairs, Goal) :-
+    maplist(make_hidden_to_serial_entry(SerialPairs), HiddenVarNames, HiddenVN),
+    maplist(make_serialise_goal(VN, SerialPairs), HiddenVarNames, SerialGoals),
+    generate_menu_form(Prompts, VarName, Choices, HiddenVarNames, NextStep,
+                       InputKind, HiddenVN, Form),
     FormGoal = reply_html_page(title('Form'), [Form]),
     ce_goals_to_conj(SerialGoals, SerialConj),
     ( SerialConj = true ->
