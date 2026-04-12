@@ -186,6 +186,10 @@ step_2(Request) :-
 ## Running the Tests
 
 ```bash
+# Stage 13 — example-based conversion (auth login/register/forgot-password)
+swipl -g "load_test_files([]), run_tests, halt" -t halt \
+      tests/test_web_server_generator.pl
+
 # Stage 12 — CLI entrypoint
 swipl -g "load_test_files([]), run_tests, halt" -t halt \
       tests/test_vetusia_converter.pl
@@ -205,6 +209,18 @@ swipl -g "load_test_files([]), run_tests, halt" -t halt \
 
 ---
 
+## Stage 13 — Example-Based Conversion
+
+`examples/auth_example.pl` is a terminal authentication program with three
+flows (register, login, forgot password) and a retry loop for invalid input.
+`examples/auth_web_example.pl` is the hand-annotated reference web output.
+
+See [`docs/auth_example_comparison.md`](docs/auth_example_comparison.md)
+for a detailed explanation of every expected difference between the terminal
+input and the generated web output.
+
+---
+
 ## Project Layout
 
 ```
@@ -217,16 +233,20 @@ vetusiapl2webpl/
 │   ├── vetusia_converter.pl      ← Stage 12: CLI entrypoint
 │   └── vetusiapl2webpl.pl        ← original single-module converter (convert/2)
 ├── examples/
+│   ├── auth_example.pl           ← Stage 13: terminal login/register/forgot-password input
+│   ├── auth_web_example.pl       ← Stage 13: reference web output for auth_example.pl
 │   ├── input_example.pl          ← sample terminal Prolog input
-│   └── output_example.pl         ← reference web Prolog output
+│   ├── output_example.pl         ← reference web Prolog output (simple sequential)
+│   └── web_support_example.pl    ← Stage 11: web_support.pl variant of output_example
 ├── tests/
 │   ├── test_reader.pl                ← Stage 2 test suite
 │   ├── test_checkpoint_detector.pl   ← Stage 3 test suite
 │   ├── test_continuation_extractor.pl← Stage 4 test suite
-│   ├── test_web_server_generator.pl  ← Stage 5 test suite
+│   ├── test_web_server_generator.pl  ← Stage 5 + Stage 13 test suite
 │   └── test_vetusiapl2webpl.pl       ← original converter test suite
 ├── docs/
-│   └── architecture.md           ← design and extension guide
+│   ├── architecture.md              ← design and extension guide
+│   └── auth_example_comparison.md   ← Stage 13: comparison notes for auth conversion
 ├── output/                       ← default output directory
 ├── README.md
 └── LICENSE

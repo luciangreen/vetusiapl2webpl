@@ -270,3 +270,147 @@ test(auth_example_branching, [
     lines_contain(Lines, 'step_1(').
 
 :- end_tests(generate_web_server_auth_integration).
+
+% ==========================================================================
+% Stage 13 integration tests: example-based conversion (auth_example.pl)
+% ==========================================================================
+
+:- begin_tests(stage13_auth_example_based_conversion).
+
+%% Full structural test: validate that the converter produces the expected
+%% family of output for the login/register/forgot-password example.
+test(auth_all_step_handlers, [
+        setup(tmp_file_stream(text, TmpFile, TmpStream)),
+        cleanup( ( exists_file(TmpFile) -> delete_file(TmpFile) ; true ) )
+    ]) :-
+    close(TmpStream),
+    wsg_test_dir(TestDir),
+    file_directory_name(TestDir, RepoRoot),
+    atomic_list_concat([RepoRoot, '/examples/auth_example.pl'], InputFile),
+    generate_web_server(InputFile, TmpFile),
+    open(TmpFile, read, S),
+    read_all_lines(S, Lines),
+    close(S),
+    % Root GET handler (step_0 — landing page)
+    lines_contain(Lines, 'step_0('),
+    % Continuation handlers for the branching flow (step_1 dispatch + sub-flows)
+    lines_contain(Lines, 'step_1('),
+    % Register flow: Username → Password → Email → result
+    lines_contain(Lines, 'step_2('),
+    lines_contain(Lines, 'step_3('),
+    lines_contain(Lines, 'step_4('),
+    % Login flow: Username → Password → result
+    lines_contain(Lines, 'step_5('),
+    lines_contain(Lines, 'step_6('),
+    % Forgot password flow: Email → result
+    lines_contain(Lines, 'step_7(').
+
+test(auth_root_handler_declaration, [
+        setup(tmp_file_stream(text, TmpFile, TmpStream)),
+        cleanup( ( exists_file(TmpFile) -> delete_file(TmpFile) ; true ) )
+    ]) :-
+    close(TmpStream),
+    wsg_test_dir(TestDir),
+    file_directory_name(TestDir, RepoRoot),
+    atomic_list_concat([RepoRoot, '/examples/auth_example.pl'], InputFile),
+    generate_web_server(InputFile, TmpFile),
+    open(TmpFile, read, S),
+    read_all_lines(S, Lines),
+    close(S),
+    % Root handler (GET) and POST continuation handlers
+    lines_contain(Lines, 'http_handler(root(.)'),
+    lines_contain(Lines, 'method(post)').
+
+test(auth_html_form_emission, [
+        setup(tmp_file_stream(text, TmpFile, TmpStream)),
+        cleanup( ( exists_file(TmpFile) -> delete_file(TmpFile) ; true ) )
+    ]) :-
+    close(TmpStream),
+    wsg_test_dir(TestDir),
+    file_directory_name(TestDir, RepoRoot),
+    atomic_list_concat([RepoRoot, '/examples/auth_example.pl'], InputFile),
+    generate_web_server(InputFile, TmpFile),
+    open(TmpFile, read, S),
+    read_all_lines(S, Lines),
+    close(S),
+    % HTML form emission via reply_html_page/2
+    lines_contain(Lines, 'reply_html_page'),
+    % Form elements
+    lines_contain(Lines, 'method=post'),
+    lines_contain(Lines, 'type=submit'),
+    % Menu rendered as radio buttons (3 choices → radio per Stage 9)
+    lines_contain(Lines, 'type=radio').
+
+test(auth_request_reading_and_post_processing, [
+        setup(tmp_file_stream(text, TmpFile, TmpStream)),
+        cleanup( ( exists_file(TmpFile) -> delete_file(TmpFile) ; true ) )
+    ]) :-
+    close(TmpStream),
+    wsg_test_dir(TestDir),
+    file_directory_name(TestDir, RepoRoot),
+    atomic_list_concat([RepoRoot, '/examples/auth_example.pl'], InputFile),
+    generate_web_server(InputFile, TmpFile),
+    open(TmpFile, read, S),
+    read_all_lines(S, Lines),
+    close(S),
+    % Request parameter extraction (http_parameters/2)
+    lines_contain(Lines, 'http_parameters'),
+    % State serialisation round-trip (Stage 8)
+    lines_contain(Lines, 'state_serialise'),
+    lines_contain(Lines, 'state_deserialise'),
+    % Variable names from the source are preserved
+    lines_contain(Lines, 'Choice'),
+    lines_contain(Lines, 'Username'),
+    lines_contain(Lines, 'Password'),
+    lines_contain(Lines, 'Email').
+
+test(auth_retry_redirect, [
+        setup(tmp_file_stream(text, TmpFile, TmpStream)),
+        cleanup( ( exists_file(TmpFile) -> delete_file(TmpFile) ; true ) )
+    ]) :-
+    close(TmpStream),
+    wsg_test_dir(TestDir),
+    file_directory_name(TestDir, RepoRoot),
+    atomic_list_concat([RepoRoot, '/examples/auth_example.pl'], InputFile),
+    generate_web_server(InputFile, TmpFile),
+    open(TmpFile, read, S),
+    read_all_lines(S, Lines),
+    close(S),
+    % Invalid-choice else arm: original recursive main call → http_redirect
+    lines_contain(Lines, 'http_redirect').
+
+test(auth_branching_dispatch, [
+        setup(tmp_file_stream(text, TmpFile, TmpStream)),
+        cleanup( ( exists_file(TmpFile) -> delete_file(TmpFile) ; true ) )
+    ]) :-
+    close(TmpStream),
+    wsg_test_dir(TestDir),
+    file_directory_name(TestDir, RepoRoot),
+    atomic_list_concat([RepoRoot, '/examples/auth_example.pl'], InputFile),
+    generate_web_server(InputFile, TmpFile),
+    open(TmpFile, read, S),
+    read_all_lines(S, Lines),
+    close(S),
+    % Branching form targets: step_1 dispatches to three sub-flows
+    lines_contain(Lines, '/step_2'),
+    lines_contain(Lines, '/step_5'),
+    lines_contain(Lines, '/step_7').
+
+test(auth_result_format_calls_preserved, [
+        setup(tmp_file_stream(text, TmpFile, TmpStream)),
+        cleanup( ( exists_file(TmpFile) -> delete_file(TmpFile) ; true ) )
+    ]) :-
+    close(TmpStream),
+    wsg_test_dir(TestDir),
+    file_directory_name(TestDir, RepoRoot),
+    atomic_list_concat([RepoRoot, '/examples/auth_example.pl'], InputFile),
+    generate_web_server(InputFile, TmpFile),
+    open(TmpFile, read, S),
+    read_all_lines(S, Lines),
+    close(S),
+    % Original format/2 goals are preserved verbatim in result handlers
+    lines_contain(Lines, 'Registered:'),
+    lines_contain(Lines, 'Welcome back'),
+    lines_contain(Lines, 'Password reset link').
+
+:- end_tests(stage13_auth_example_based_conversion).
