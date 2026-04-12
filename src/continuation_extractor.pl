@@ -68,6 +68,7 @@
 
 :- use_module(html_output).
 :- use_module(form_generator).
+:- use_module(state_serialiser).
 
 % ==========================================================================
 % Public API
@@ -370,20 +371,52 @@ emit_ce_server_init(Out) :-
 %% write_cont_step(+Out, +VN, +Step) is det.
 %
 %  Write one HTTP handler clause for the given cont_step/4 term.
+%
+%  Stage 8 state preservation:
+%    For each received variable, http_parameters binds a "raw" counterpart
+%    (e.g. Name_raw) and state_deserialise/2 converts it to the original
+%    Prolog term (Name).  For each hidden field in the response, a "serial"
+%    counterpart (e.g. Name_s) is produced by state_serialise/2 and used as
+%    the hidden field value so that complex terms survive the round-trip.
 write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) :-
     % Request variable: underscore-prefixed for step_0 (never used),
     % plain for all POST steps (passed to http_parameters/2 and http_redirect/3).
     ( StepName = step_0 -> ReqAtom = '_Request' ; ReqAtom = 'Request' ),
-    ExtVN = [ReqAtom = ReqVar | VN],
-    % Build the full clause body as a Prolog term, then write it.
-    build_params_goal(RecvVarNames, ReqVar, VN, ParamsGoal),
+
+    % ── Stage 8: create raw variable pairs for http_parameters ────────────
+    %  For each received variable 'Name', create a fresh 'Name_raw' variable.
+    maplist(raw_var_name, RecvVarNames, RawNames),
+    maplist(make_fresh_pair, RawNames, RawPairs),
+
+    % ── Stage 8: create serial variable pairs for hidden field values ─────
+    %  Collect all hidden variable names from the response tree, then create
+    %  fresh 'Name_s' variables for each.
+    collect_response_hidden_vars(Response, HiddenVarNames),
+    maplist(serial_var_name, HiddenVarNames, SerialNames),
+    maplist(make_fresh_pair, SerialNames, SerialPairs),
+
+    % Extended VN for write_term (includes raw, serial, and original vars).
+    append(RawPairs, SerialPairs, AuxPairs),
+    append(AuxPairs, VN, AllVN),
+    ExtVN = [ReqAtom = ReqVar | AllVN],
+
+    % Build http_parameters goal using raw variables.
+    build_params_with_raws(RecvVarNames, ReqVar, RawPairs, ParamsGoal),
+
+    % Build state_deserialise/2 goals: one per received variable.
+    build_deserialise_goals(RecvVarNames, VN, RawPairs, DeserGoals),
+
+    % Compute goals from the cont_step PreGoals.
     maplist(norm_goal_to_call, PreGoals, PreCalls),
-    response_to_goal(Response, ReqVar, VN, RespGoal),
-    ce_goals_to_conj([ParamsGoal | PreCalls], PreConj),
-    ( PreConj = true ->
-        Body = RespGoal
-    ;   Body = (PreConj, RespGoal)
-    ),
+
+    % Build response goal (uses serial pairs for hidden field serialisation).
+    response_to_goal(Response, ReqVar, VN, SerialPairs, RespGoal),
+
+    % Assemble the full clause body.
+    append([ParamsGoal | DeserGoals], PreCalls, PreBody),
+    append(PreBody, [RespGoal], AllGoals),
+    ce_goals_to_conj(AllGoals, Body),
+
     Head =.. [StepName, ReqVar],
     Clause = (Head :- Body),
     nl(Out),
@@ -391,10 +424,97 @@ write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) 
     write_term(Out, Clause, [variable_names(ExtVN), quoted(true)]),
     format(Out, ".~n", []).
 
+% ── Stage 8: state-preservation helpers ───────────────────────────────────
+
+%% raw_var_name(+VarName:atom, -RawName:atom) is det.
+%
+%  Compute the "raw" counterpart name for a received variable.
+%  e.g.  'Name' → 'Name_raw'
+raw_var_name(VarName, RawName) :-
+    atom_concat(VarName, '_raw', RawName).
+
+%% serial_var_name(+VarName:atom, -SerName:atom) is det.
+%
+%  Compute the "serial" counterpart name for a hidden-state variable.
+%  e.g.  'Name' → 'Name_s'
+serial_var_name(VarName, SerName) :-
+    atom_concat(VarName, '_s', SerName).
+
+%% make_fresh_pair(+Name:atom, -Pair) is det.
+%
+%  Create a fresh Name=Var pair where Var is an uninstantiated Prolog
+%  variable.  Each call creates a distinct fresh variable.
+make_fresh_pair(Name, Name = _).
+
+%% build_params_with_raws(+VarNames, +ReqVar, +RawPairs, -Goal) is det.
+%
+%  Build an http_parameters/2 goal that binds each variable to its raw
+%  counterpart in RawPairs.  Returns 'true' for an empty variable list.
+build_params_with_raws([], _, _, true) :- !.
+build_params_with_raws(VarNames, ReqVar, RawPairs,
+                       http_parameters(ReqVar, ParamTerms)) :-
+    maplist(make_raw_param_term(RawPairs), VarNames, ParamTerms).
+
+%% make_raw_param_term(+RawPairs, +VarName, -ParamTerm) is det.
+%
+%  Build a 'VarName'(RawVar, [atom]) term for http_parameters/2 where
+%  RawVar is the raw variable looked up from RawPairs.
+make_raw_param_term(RawPairs, VarName, ParamTerm) :-
+    raw_var_name(VarName, RawName),
+    ce_find_var(RawName, RawPairs, RawVar),
+    ParamTerm =.. [VarName, RawVar, [atom]].
+
+%% build_deserialise_goals(+VarNames, +VN, +RawPairs, -Goals) is det.
+%
+%  Build a list of state_deserialise/2 goals, one per variable in VarNames.
+%  Each goal: state_deserialise(VarName_raw, VarName)
+build_deserialise_goals([], _, _, []).
+build_deserialise_goals([VarName | Rest], VN, RawPairs,
+                        [state_deserialise(RawVar, Var) | RestGoals]) :-
+    ce_find_var(VarName, VN, Var),
+    raw_var_name(VarName, RawName),
+    ce_find_var(RawName, RawPairs, RawVar),
+    build_deserialise_goals(Rest, VN, RawPairs, RestGoals).
+
+%% collect_response_hidden_vars(+Response, -HiddenVarNames) is det.
+%
+%  Collect the union of all HiddenVarNames from every form_resp node in
+%  the response tree (form_resp, cond_resp branches, etc.).
+collect_response_hidden_vars(form_resp(_, _, HiddenVarNames, _, _),
+                             HiddenVarNames) :- !.
+collect_response_hidden_vars(cond_resp(_, ThenResp, ElseResp), All) :- !,
+    collect_response_hidden_vars(ThenResp, ThenH),
+    collect_response_hidden_vars(ElseResp, ElseH),
+    append(ThenH, ElseH, All0),
+    list_to_set(All0, All).
+collect_response_hidden_vars(_, []).
+
+%% make_hidden_to_serial_entry(+SerialPairs, +VarName, -Entry) is det.
+%
+%  Build a VarName=SerialVar entry that maps the hidden variable name to
+%  its serial-variable counterpart.  Used to construct the HiddenVN list
+%  passed to generate_form/7 so hidden inputs use the serialised values.
+make_hidden_to_serial_entry(SerialPairs, VarName, VarName = SerVar) :-
+    serial_var_name(VarName, SerName),
+    ce_find_var(SerName, SerialPairs, SerVar).
+
+%% make_serialise_goal(+VN, +SerialPairs, +VarName, -Goal) is det.
+%
+%  Build a state_serialise/2 goal: state_serialise(Var, Var_s)
+%  where Var is the original variable and Var_s is its serial counterpart.
+make_serialise_goal(VN, SerialPairs, VarName,
+                    state_serialise(Var, SerVar)) :-
+    ce_find_var(VarName, VN, Var),
+    serial_var_name(VarName, SerName),
+    ce_find_var(SerName, SerialPairs, SerVar).
+
+% ── Original build_params_goal kept for reference ─────────────────────────
+
 %% build_params_goal(+VarNames, +ReqVar, +VN, -Goal) is det.
 %
 %  Build the http_parameters/2 goal for the given variable names.
 %  Returns 'true' when the list is empty (step_0 has no parameters).
+%  NOTE: superseded by build_params_with_raws/4 in write_cont_step.
 build_params_goal([], _, _, true) :- !.
 build_params_goal(VarNames, ReqVar, VN, http_parameters(ReqVar, ParamTerms)) :-
     maplist(make_param_term(VN), VarNames, ParamTerms).
@@ -413,18 +533,35 @@ norm_goal_to_call(norm_goal(G), G) :- !.
 norm_goal_to_call(norm_cut, !)    :- !.
 norm_goal_to_call(G, G).
 
-%% response_to_goal(+Response, +ReqVar, +VN, -Goal) is det.
+%% response_to_goal(+Response, +ReqVar, +VN, +SerialPairs, -Goal) is det.
 %
-%  Convert a Response term into a Prolog goal term suitable for
-%  inclusion in a handler clause body.
+%  Convert a Response term into a Prolog goal term suitable for inclusion
+%  in a handler clause body.
+%
+%  SerialPairs — list of 'Name_s' = SerVar pairs created in write_cont_step.
+%    For form_resp: serial variables are used as hidden field values, and
+%    state_serialise/2 goals are prepended to the form goal.
+%    For other response types: SerialPairs is passed through but not used
+%    at the top level.
 response_to_goal(form_resp(Prompts, InputVarName, HiddenVarNames, NextStep,
                            InputKind),
-                 _ReqVar, VN, Goal) :-
+                 _ReqVar, VN, SerialPairs, Goal) :-
+    % Build HiddenVN: maps each hidden var name to its serial variable.
+    maplist(make_hidden_to_serial_entry(SerialPairs), HiddenVarNames, HiddenVN),
+    % Build state_serialise/2 goals for each hidden variable.
+    maplist(make_serialise_goal(VN, SerialPairs), HiddenVarNames, SerialGoals),
+    % Generate form using the serial VN so hidden fields carry serialised values.
     generate_form(Prompts, InputVarName, HiddenVarNames, NextStep,
-                  InputKind, VN, Form),
-    Goal = reply_html_page(title('Form'), [Form]).
+                  InputKind, HiddenVN, Form),
+    FormGoal = reply_html_page(title('Form'), [Form]),
+    ce_goals_to_conj(SerialGoals, SerialConj),
+    ( SerialConj = true ->
+        Goal = FormGoal
+    ;   Goal = (SerialConj, FormGoal)
+    ).
 
-response_to_goal(result_resp(Goals, _LiveVars), _ReqVar, _VN, Goal) :-
+response_to_goal(result_resp(Goals, _LiveVars), _ReqVar, _VN, _SerialPairs,
+                 Goal) :-
     maplist(norm_output_to_result_call, Goals, Lines),
     ce_goals_to_conj(
         [ html_page_header('Result')
@@ -437,24 +574,26 @@ response_to_goal(result_resp(Goals, _LiveVars), _ReqVar, _VN, Goal) :-
     ;   Goal = (PreGoal, LastGoal)
     ).
 
-response_to_goal(cond_resp([], ThenResp, ElseResp), ReqVar, VN, Goal) :- !,
-    response_to_goal(ThenResp, ReqVar, VN, ThenGoal),
-    response_to_goal(ElseResp, ReqVar, VN, ElseGoal),
+response_to_goal(cond_resp([], ThenResp, ElseResp), ReqVar, VN,
+                 SerialPairs, Goal) :- !,
+    response_to_goal(ThenResp, ReqVar, VN, SerialPairs, ThenGoal),
+    response_to_goal(ElseResp, ReqVar, VN, SerialPairs, ElseGoal),
     Goal = (ThenGoal ; ElseGoal).
 
-response_to_goal(cond_resp(CondGoals, ThenResp, ElseResp), ReqVar, VN, Goal) :-
+response_to_goal(cond_resp(CondGoals, ThenResp, ElseResp), ReqVar, VN,
+                 SerialPairs, Goal) :-
     % CondGoals are norm_goal/1 terms; unwrap to raw Prolog goals before
     % building the conjunction that appears in the if-then-else condition.
     maplist(norm_goal_to_raw, CondGoals, RawCondGoals),
     ce_goals_to_conj(RawCondGoals, Cond),
-    response_to_goal(ThenResp, ReqVar, VN, ThenGoal),
-    response_to_goal(ElseResp, ReqVar, VN, ElseGoal),
+    response_to_goal(ThenResp, ReqVar, VN, SerialPairs, ThenGoal),
+    response_to_goal(ElseResp, ReqVar, VN, SerialPairs, ElseGoal),
     ( Cond = true ->
         Goal = (ThenGoal ; ElseGoal)
     ;   Goal = (Cond -> ThenGoal ; ElseGoal)
     ).
 
-response_to_goal(retry_resp(TargetStep), ReqVar, _VN, Goal) :-
+response_to_goal(retry_resp(TargetStep), ReqVar, _VN, _SerialPairs, Goal) :-
     ( TargetStep = step_0 ->
         Goal = http_redirect(see_other, root(.), ReqVar)
     ;   atom_concat('/', TargetStep, Path),

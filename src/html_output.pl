@@ -66,6 +66,7 @@
  */
 
 :- use_module(library(lists)).
+:- use_module(state_serialiser).
 
 % ==========================================================================
 % HTML fragment detection
@@ -209,7 +210,8 @@ emit_html_helpers(Out) :-
     emit_html_safe_writeln(Out),
     emit_html_safe_write(Out),
     emit_html_page_header(Out),
-    emit_html_page_footer(Out).
+    emit_html_page_footer(Out),
+    emit_state_serialiser_helpers(Out).
 
 emit_looks_like_html(Out) :-
     format(Out, "looks_like_html(X) :-~n", []),
