@@ -67,6 +67,7 @@
 :- use_module(library(apply)).
 
 :- use_module(html_output).
+:- use_module(form_generator).
 
 % ==========================================================================
 % Public API
@@ -95,7 +96,7 @@ cont_step_name(N, Name) :-
 extract_continuations([], _VN, _Head, []) :- !.
 extract_continuations(Checkpoints, VN, Head, Steps) :-
     Checkpoints = [FirstCP | _],
-    FirstCP = checkpoint(_, _, FirstVarName, FirstPrompts, _, FirstLiveVars, _),
+    FirstCP = checkpoint(_, FirstKind, FirstVarName, FirstPrompts, _, FirstLiveVars, _),
     % step_0: entry GET handler — no parameters received.
     % The hidden vars for the form = LiveVars of FirstCP minus FirstVarName
     % (those are carried forward to step_1; but step_1 = FirstCP's step, and
@@ -103,8 +104,10 @@ extract_continuations(Checkpoints, VN, Head, Steps) :-
     %  HiddenVars0 is typically empty).
     exclude(==(FirstVarName), FirstLiveVars, HiddenVars0),
     cont_step_name(1, FirstNextStep),
+    select_input_type(FirstKind, FirstVarName, FirstPrompts, FirstInputType),
     Step0 = cont_step(step_0, [], [],
-                      form_resp(FirstPrompts, FirstVarName, HiddenVars0, FirstNextStep)),
+                      form_resp(FirstPrompts, FirstVarName, HiddenVars0,
+                                FirstNextStep, FirstInputType)),
     % Generate steps 1..N from each checkpoint.
     gen_cont_steps(Checkpoints, VN, Head, ContSteps),
     Steps = [Step0 | ContSteps].
@@ -229,12 +232,14 @@ compile_cont_body(NormBody, _LiveVars, _ContCPs, _VN, Head,
 % Body contains at least one read — generate form_resp using the first
 % remaining checkpoint (ContCPs head) to get the prompts and input var.
 compile_cont_body(NormBody, _LiveVars, [NextCP | _], _VN, _Head,
-                  form_resp(Prompts, InputVarName, HiddenVarNames, NextStep)) :-
+                  form_resp(Prompts, InputVarName, HiddenVarNames,
+                            NextStep, InputKind)) :-
     contains_read_in_body(NormBody), !,
-    NextCP = checkpoint(Id, _, InputVarName, Prompts, _, NextLiveVars, _),
+    NextCP = checkpoint(Id, Kind, InputVarName, Prompts, _, NextLiveVars, _),
     % Hidden vars = what step_{Id} receives minus the var it is about to read.
     exclude(==(InputVarName), NextLiveVars, HiddenVarNames),
-    cont_step_name(Id, NextStep).
+    cont_step_name(Id, NextStep),
+    select_input_type(Kind, InputVarName, Prompts, InputKind).
 
 % Terminal body with no reads and no retry — result page.
 compile_cont_body(NormBody, LiveVars, _ContCPs, _VN, _Head,
@@ -412,17 +417,12 @@ norm_goal_to_call(G, G).
 %
 %  Convert a Response term into a Prolog goal term suitable for
 %  inclusion in a handler clause body.
-response_to_goal(form_resp(Prompts, InputVarName, HiddenVarNames, NextStep),
+response_to_goal(form_resp(Prompts, InputVarName, HiddenVarNames, NextStep,
+                           InputKind),
                  _ReqVar, VN, Goal) :-
-    atom_concat('/', NextStep, Action),
-    maplist(make_hidden_input_term(VN), HiddenVarNames, HiddenInputs),
-    maplist(norm_output_to_html_term, Prompts, PromptHtmls),
-    TextInput   = input([type=text,   name=InputVarName]),
-    SubmitInput = input([type=submit, value='Next']),
-    append(HiddenInputs, PromptHtmls, Acc),
-    append(Acc, [TextInput, SubmitInput], FormChildren),
-    Form      = form([method=post, action=Action], FormChildren),
-    Goal      = reply_html_page(title('Form'), [Form]).
+    generate_form(Prompts, InputVarName, HiddenVarNames, NextStep,
+                  InputKind, VN, Form),
+    Goal = reply_html_page(title('Form'), [Form]).
 
 response_to_goal(result_resp(Goals, _LiveVars), _ReqVar, _VN, Goal) :-
     maplist(norm_output_to_result_call, Goals, Lines),
@@ -464,12 +464,6 @@ response_to_goal(retry_resp(TargetStep), ReqVar, _VN, Goal) :-
 % ==========================================================================
 % Internal: HTML / output helpers
 % ==========================================================================
-
-%% make_hidden_input_term(+VN, +VarName, -InputTerm) is det.
-%
-%  Build an input([type=hidden, name=VarName, value=Var]) term.
-make_hidden_input_term(VN, VarName, input([type=hidden, name=VarName, value=Var])) :-
-    ce_find_var(VarName, VN, Var).
 
 % norm_output_to_html_term/2 and norm_output_to_result_call/2 are imported
 % from the html_output module (Stage 6).

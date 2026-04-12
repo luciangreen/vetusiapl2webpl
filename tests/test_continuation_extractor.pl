@@ -101,18 +101,18 @@ test(step_0_has_no_recv_vars) :-
 test(step_0_has_form_resp) :-
     two_read_body_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [Step0 | _]),
-    Step0 = cont_step(step_0, _, _, form_resp(_, _, _, _)).
+    Step0 = cont_step(step_0, _, _, form_resp(_, _, _, _, _)).
 
 test(step_0_asks_for_name) :-
     two_read_body_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [Step0 | _]),
-    Step0 = cont_step(step_0, _, _, form_resp(_, InputVarName, _, _)),
+    Step0 = cont_step(step_0, _, _, form_resp(_, InputVarName, _, _, _)),
     InputVarName = 'Name'.
 
 test(step_0_posts_to_step_1) :-
     two_read_body_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [Step0 | _]),
-    Step0 = cont_step(step_0, _, _, form_resp(_, _, _, NextStep)),
+    Step0 = cont_step(step_0, _, _, form_resp(_, _, _, NextStep, _)),
     NextStep = step_1.
 
 test(step_1_is_second) :-
@@ -129,12 +129,12 @@ test(step_1_receives_name) :-
 test(step_1_has_form_resp_for_age) :-
     two_read_body_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [_, Step1 | _]),
-    Step1 = cont_step(step_1, _, _, form_resp(_, 'Age', _, step_2)).
+    Step1 = cont_step(step_1, _, _, form_resp(_, 'Age', _, step_2, _)).
 
 test(step_1_carries_name_in_hidden) :-
     two_read_body_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [_, Step1 | _]),
-    Step1 = cont_step(step_1, _, _, form_resp(_, _, HiddenVars, _)),
+    Step1 = cont_step(step_1, _, _, form_resp(_, _, HiddenVars, _, _)),
     memberchk('Name', HiddenVars).
 
 test(step_2_is_last) :-
@@ -340,24 +340,24 @@ test(menu_cond_then_is_form_resp) :-
     menu_two_branch_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [_, Step1 | _]),
     Step1 = cont_step(step_1, _, _, cond_resp(_, ThenResp, _)),
-    ThenResp = form_resp(_, _, _, _).
+    ThenResp = form_resp(_, _, _, _, _).
 
 test(menu_cond_else_is_form_resp) :-
     menu_two_branch_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [_, Step1 | _]),
     Step1 = cont_step(step_1, _, _, cond_resp(_, _, ElseResp)),
-    ElseResp = form_resp(_, _, _, _).
+    ElseResp = form_resp(_, _, _, _, _).
 
 test(menu_then_form_posts_to_step_2) :-
     menu_two_branch_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [_, Step1 | _]),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, form_resp(_, _, _, ThenNext), _)),
+    Step1 = cont_step(step_1, _, _, cond_resp(_, form_resp(_, _, _, ThenNext, _), _)),
     ThenNext = step_2.
 
 test(menu_else_form_posts_to_step_3) :-
     menu_two_branch_cps(CPs, VN),
     extract_continuations(CPs, VN, none, [_, Step1 | _]),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, _, form_resp(_, _, _, ElseNext))),
+    Step1 = cont_step(step_1, _, _, cond_resp(_, _, form_resp(_, _, _, ElseNext, _))),
     ElseNext = step_3.
 
 test(menu_step_2_has_result_resp) :-
@@ -404,7 +404,7 @@ test(auth_step_0_is_entry) :-
 %% step_0 asks for the menu Choice.
 test(auth_step_0_asks_for_choice) :-
     auth_steps([Step0 | _], _),
-    Step0 = cont_step(step_0, _, _, form_resp(_, 'Choice', _, step_1)).
+    Step0 = cont_step(step_0, _, _, form_resp(_, 'Choice', _, step_1, _)).
 
 %% step_1 dispatches on the menu choice (cond_resp).
 test(auth_step_1_has_cond_resp) :-
@@ -421,24 +421,24 @@ test(auth_step_1_receives_choice) :-
 test(auth_step_1_then_is_form_for_username) :-
     auth_steps([_, Step1 | _], _),
     Step1 = cont_step(step_1, _, _, cond_resp(_, ThenResp, _)),
-    ThenResp = form_resp(_, 'Username', _, _).
+    ThenResp = form_resp(_, 'Username', _, _, _).
 
 %% The register flow leads to step_2 (Username) → step_3 (Password) → step_4 (Email) → result.
 test(auth_register_then_arm_posts_to_step_2) :-
     auth_steps([_, Step1 | _], _),
-    Step1 = cont_step(step_1, _, _, cond_resp(_, form_resp(_, _, _, step_2), _)).
+    Step1 = cont_step(step_1, _, _, cond_resp(_, form_resp(_, _, _, step_2, _), _)).
 
 %% step_2 (Username in Register) posts to step_3 (Password).
 test(auth_step_2_posts_to_step_3) :-
     auth_steps(Steps, _),
     nth1(3, Steps, Step2),
-    Step2 = cont_step(step_2, _, _, form_resp(_, 'Password', _, step_3)).
+    Step2 = cont_step(step_2, _, _, form_resp(_, 'Password', _, step_3, _)).
 
 %% step_3 (Password in Register) posts to step_4 (Email).
 test(auth_step_3_posts_to_step_4) :-
     auth_steps(Steps, _),
     nth1(4, Steps, Step3),
-    Step3 = cont_step(step_3, _, _, form_resp(_, 'Email', _, step_4)).
+    Step3 = cont_step(step_3, _, _, form_resp(_, 'Email', _, step_4, _)).
 
 %% step_4 is the Register result step.
 test(auth_step_4_is_result) :-
@@ -538,12 +538,12 @@ response_contains_retry(cond_resp(_, ThenR, ElseR), T) :-
     ( response_contains_retry(ThenR, T) -> true
     ; response_contains_retry(ElseR, T)
     ).
-response_contains_retry(form_resp(_, _, _, _), _) :- fail.
+response_contains_retry(form_resp(_, _, _, _, _), _) :- fail.
 response_contains_retry(result_resp(_, _),     _) :- fail.
 
 %% find_step_in_response(+Response, +StepName) is semidet.
 %  True when at least one form_resp in Response posts to StepName.
-find_step_in_response(form_resp(_, _, _, Next), Next) :- !.
+find_step_in_response(form_resp(_, _, _, Next, _), Next) :- !.
 find_step_in_response(cond_resp(_, ThenR, ElseR), S) :-
     ( find_step_in_response(ThenR, S) -> true
     ; find_step_in_response(ElseR, S)
