@@ -401,10 +401,10 @@ test(auth_produces_eight_steps) :-
 test(auth_step_0_is_entry) :-
     auth_steps([cont_step(step_0, [], _, _) | _], _).
 
-%% step_0 asks for the menu Choice.
+%% step_0 asks for the menu Choice via a menu_resp (Stage 9).
 test(auth_step_0_asks_for_choice) :-
     auth_steps([Step0 | _], _),
-    Step0 = cont_step(step_0, _, _, form_resp(_, 'Choice', _, step_1, _)).
+    Step0 = cont_step(step_0, _, _, menu_resp(_, 'Choice', _, _, step_1, _)).
 
 %% step_1 dispatches on the menu choice (cond_resp).
 test(auth_step_1_has_cond_resp) :-
@@ -539,11 +539,13 @@ response_contains_retry(cond_resp(_, ThenR, ElseR), T) :-
     ; response_contains_retry(ElseR, T)
     ).
 response_contains_retry(form_resp(_, _, _, _, _), _) :- fail.
+response_contains_retry(menu_resp(_, _, _, _, _, _), _) :- fail.
 response_contains_retry(result_resp(_, _),     _) :- fail.
 
 %% find_step_in_response(+Response, +StepName) is semidet.
-%  True when at least one form_resp in Response posts to StepName.
+%  True when at least one form_resp or menu_resp in Response posts to StepName.
 find_step_in_response(form_resp(_, _, _, Next, _), Next) :- !.
+find_step_in_response(menu_resp(_, _, _, _, Next, _), Next) :- !.
 find_step_in_response(cond_resp(_, ThenR, ElseR), S) :-
     ( find_step_in_response(ThenR, S) -> true
     ; find_step_in_response(ElseR, S)

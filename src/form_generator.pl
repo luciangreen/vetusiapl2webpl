@@ -2,7 +2,9 @@
     select_input_type/4,
     build_hidden_inputs/3,
     build_input_field/3,
-    generate_form/7
+    generate_form/7,
+    build_menu_input/4,
+    generate_menu_form/8
 ]).
 
 /** <module> form_generator — Stage 7: HTML Form Generation for read_string
@@ -221,4 +223,90 @@ generate_form(Prompts, InputVarName, HiddenVarNames, NextStep,
     SubmitInput = input([type=submit, value='Next']),
     append(HiddenInputs, PromptHtmls, Acc),
     append(Acc, [InputField, SubmitInput], FormChildren),
+    Form = form([method=post, action=Action], FormChildren).
+
+% ==========================================================================
+% Menu input builder
+% ==========================================================================
+
+%% build_menu_input(+InputKind, +VarName, +Choices, -Fields) is det.
+%
+%  Build a list of HTML element terms for a menu selection widget.
+%
+%  InputKind — radio | select | buttons
+%  VarName   — atom: the form field name (shared by all choices)
+%  Choices   — list of menu_choice(Value, Label) terms
+%  Fields    — list of HTML element terms to embed in the form
+%
+%  radio:   one span([], [input(type=radio…), Label]) per choice.
+%  select:  a single select([name=VarName], [option…, …]) element.
+%  buttons: one button([type=submit, name=VarName, value=Value], Label)
+%           per choice (no separate submit needed).
+build_menu_input(radio, VarName, Choices, Fields) :-
+    maplist(fg_radio_option(VarName), Choices, Fields).
+build_menu_input(select, VarName, Choices, [Select]) :-
+    maplist(fg_select_option, Choices, Options),
+    Select = select([name=VarName, autofocus=autofocus], Options).
+build_menu_input(buttons, VarName, Choices, Fields) :-
+    maplist(fg_button(VarName), Choices, Fields).
+build_menu_input(_, VarName, Choices, Fields) :-
+    build_menu_input(radio, VarName, Choices, Fields).
+
+%% fg_radio_option(+VarName, +Choice, -Element) is det.
+%
+%  Build a span wrapping a radio input and its text label.
+fg_radio_option(VarName, menu_choice(Value, Label),
+                span([],
+                     [ input([type=radio, name=VarName, value=Value]),
+                       Label
+                     ])).
+
+%% fg_select_option(+Choice, -OptionElement) is det.
+%
+%  Build an option([value=Value], Label) term for a select element.
+fg_select_option(menu_choice(Value, Label), option([value=Value], Label)).
+
+%% fg_button(+VarName, +Choice, -Element) is det.
+%
+%  Build a submit button that carries the choice value.
+fg_button(VarName, menu_choice(Value, Label),
+          button([type=submit, name=VarName, value=Value], Label)).
+
+% ==========================================================================
+% Menu form assembler
+% ==========================================================================
+
+%% generate_menu_form(+Prompts, +VarName, +Choices, +HiddenVarNames,
+%%                    +NextStep, +InputKind, +VN, -FormTerm) is det.
+%
+%  Assemble a complete HTML form for a menu selection step.
+%
+%  Form structure (in child order):
+%    1. Hidden inputs (one per name in HiddenVarNames) — preserve state.
+%    2. Prompt HTML (one element per norm_output/1 in Prompts).
+%    3. Menu input widget (radio / select / buttons).
+%    4. Submit button — omitted for InputKind = buttons (each button submits).
+%
+%  Prompts        — list of norm_output/1 goals to render as HTML content
+%  VarName        — atom: form field name for the user's choice
+%  Choices        — list of menu_choice(Value, Label) in presentation order
+%  HiddenVarNames — list of atom names to carry as hidden fields
+%  NextStep       — atom: the next handler name (e.g. step_1)
+%  InputKind      — radio | select | buttons
+%  VN             — Name=Var association list
+%  FormTerm       — form([method=post, action=Action], Children)
+generate_menu_form(Prompts, VarName, Choices, HiddenVarNames, NextStep,
+                   InputKind, VN, Form) :-
+    atom_concat('/', NextStep, Action),
+    build_hidden_inputs(HiddenVarNames, VN, HiddenInputs),
+    maplist(norm_output_to_html_term, Prompts, PromptHtmls),
+    build_menu_input(InputKind, VarName, Choices, MenuFields),
+    append(HiddenInputs, PromptHtmls, Acc0),
+    append(Acc0, MenuFields, Acc1),
+    ( InputKind = buttons ->
+        FormChildren = Acc1
+    ;
+        SubmitInput = input([type=submit, value='Next']),
+        append(Acc1, [SubmitInput], FormChildren)
+    ),
     Form = form([method=post, action=Action], FormChildren).
