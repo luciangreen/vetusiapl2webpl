@@ -8,6 +8,8 @@
     norm_output_to_result_call/2,
     % Emitter: write runtime helper definitions into a generated file
     emit_html_helpers/1,
+    % Emitter: write a use_module(web_support) loader line (Stage 11)
+    emit_web_support_loader/1,
     % Runtime helpers — page wrapper
     html_page_header/1,
     html_page_footer/0,
@@ -44,6 +46,12 @@
  *        html_safe_write/1           — HTML-escape text and emit inline
  *        looks_like_html/1           — detect HTML fragments
  *        html_escape/2               — escape HTML special characters
+ *
+ *   3. **Stage 11** — web_support loader:
+ *        emit_web_support_loader/1   — emit a single :- use_module(web_support)
+ *                                      directive into a generated file so that
+ *                                      helpers are loaded from web_support.pl
+ *                                      instead of being inlined.
  *
  * HTML fragment detection
  * -----------------------
@@ -263,6 +271,30 @@ emit_html_page_header(Out) :-
 emit_html_page_footer(Out) :-
     format(Out, "html_page_footer :-~n", []),
     format(Out, "    format('</body>\\n</html>\\n').~n~n", []).
+
+% ==========================================================================
+% Converter-side: emit a use_module(web_support) loader (Stage 11)
+% ==========================================================================
+
+%% emit_web_support_loader(+Out:stream) is det.
+%
+%  Write a single :- use_module(web_support). directive into the open output
+%  stream Out.
+%
+%  Use this instead of emit_html_helpers/1 when the generated program is
+%  deployed alongside web_support.pl and does not need to be fully
+%  self-contained.  The web_support module provides all the same runtime
+%  helpers (html_page_header/1, html_writeln/1, html_escape/2, etc.) plus
+%  additional form-output and request-extraction predicates.
+%
+%  Generated output:
+%    :- use_module(web_support).
+emit_web_support_loader(Out) :-
+    nl(Out),
+    format(Out, "%% --------------------------------------------------~n", []),
+    format(Out, "%% Runtime helpers loaded from web_support.pl (Stage 11)~n", []),
+    format(Out, "%% --------------------------------------------------~n~n", []),
+    format(Out, ":- use_module(web_support).~n~n", []).
 
 % ==========================================================================
 % Runtime helpers — page wrapper
