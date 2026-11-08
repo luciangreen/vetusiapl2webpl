@@ -86,7 +86,11 @@ generate_web_server(InputFile, OutputFile, Port) :-
     read_and_normalise(InputFile, NormClauses),
     wsg_find_main(NormClauses, MainBody, VN, AuxNorms),
     detect_checkpoints(MainBody, VN, main/0, CPs),
-    extract_continuations(CPs, VN, main/0, Steps),
+    extract_continuations(CPs, VN, main/0, Steps0),
+    % Goals before the first prompt (e.g. recording a visit) run on the
+    % landing page, as they ran before the first prompt in the terminal.
+    leading_pre_goals(MainBody, LeadingGoals),
+    add_landing_pre_goals(Steps0, LeadingGoals, Steps),
     open(OutputFile, write, Out),
     wsg_write_program(Out, Steps, VN, AuxNorms, Port),
     close(Out).
@@ -125,7 +129,8 @@ wsg_write_program(Out, Steps, VN, AuxNorms, Port) :-
     emit_html_helpers(Out),
     nl(Out),
     format(Out, "%% === HTTP Handler Clauses ===~n", []),
-    maplist(write_cont_step(Out, VN), Steps),
+    fresh_inputs(Steps, Fresh),
+    maplist(write_cont_step(Out, VN, Fresh), Steps),
     ( AuxNorms = [] -> true
     ;   nl(Out),
         format(Out, "%% === Auxiliary Predicates ===~n", []),

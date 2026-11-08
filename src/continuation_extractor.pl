@@ -2,6 +2,10 @@
     extract_continuations/4,
     write_cont_steps/3,
     write_cont_step/3,
+    write_cont_step/4,
+    fresh_inputs/2,
+    leading_pre_goals/2,
+    add_landing_pre_goals/3,
     cont_step_name/2,
     cont_step_name/3,
     collect_unsupported_messages/2,
@@ -204,7 +208,8 @@ write_cont_steps(Out, Steps, VN) :-
     emit_html_helpers(Out),
     nl(Out),
     format(Out, "%% === HTTP Handler Clauses ===~n", []),
-    maplist(write_cont_step(Out, VN), Steps).
+    fresh_inputs(Steps, Fresh),
+    maplist(write_cont_step(Out, VN, Fresh), Steps).
 
 % ==========================================================================
 % Internal: step generation
@@ -511,7 +516,18 @@ emit_ce_server_init(Out) :-
 %  scanned and their TODO messages are emitted as %% TODO: comments in the
 %  generated source so that developers can identify constructs that were not
 %  fully preserved.
-write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) :-
+write_cont_step(Out, VN, Step) :-
+    write_cont_step(Out, VN, [], Step).
+
+%% write_cont_step(+Out, +VN, +Fresh, +Step) is det.
+%
+%  Like write_cont_step/3, where Fresh is a list of StepName-VarName pairs
+%  (from fresh_inputs/2) naming the field each step receives straight from
+%  the user's typing.  That field is read back as a string, exactly as
+%  read_string/5 gives it in the terminal program (so a typed "1" still
+%  matches Choice = "1", and a typed "Ann" is not parsed as a variable);
+%  hidden fields, which were written by state_serialise/2, are deserialised.
+write_cont_step(Out, VN, Fresh, cont_step(StepName, RecvVarNames, PreGoals, Response)) :-
     % Request variable: underscore-prefixed for the landing-pad (never used),
     % plain for all POST steps (passed to http_parameters/2 and http_redirect/3).
     ( is_landing_pad_name(StepName) -> ReqAtom = '_Request' ; ReqAtom = 'Request' ),
@@ -537,7 +553,8 @@ write_cont_step(Out, VN, cont_step(StepName, RecvVarNames, PreGoals, Response)) 
     build_params_with_raws(RecvVarNames, ReqVar, RawPairs, ParamsGoal),
 
     % Build state_deserialise/2 goals: one per received variable.
-    build_deserialise_goals(RecvVarNames, VN, RawPairs, DeserGoals),
+    include(ce_is_fresh(StepName, Fresh), RecvVarNames, FreshNames),
+    build_deserialise_goals(RecvVarNames, VN, RawPairs, FreshNames, DeserGoals),
 
     % Compute goals from the cont_step PreGoals.
     maplist(norm_goal_to_call, PreGoals, PreCalls),
@@ -610,13 +627,68 @@ make_raw_param_term(RawPairs, VarName, ParamTerm) :-
 %
 %  Build a list of state_deserialise/2 goals, one per variable in VarNames.
 %  Each goal: state_deserialise(VarName_raw, VarName)
-build_deserialise_goals([], _, _, []).
-build_deserialise_goals([VarName | Rest], VN, RawPairs,
-                        [state_deserialise(RawVar, Var) | RestGoals]) :-
+build_deserialise_goals(VarNames, VN, RawPairs, Goals) :-
+    build_deserialise_goals(VarNames, VN, RawPairs, [], Goals).
+
+%% build_deserialise_goals(+VarNames, +VN, +RawPairs, +FreshNames, -Goals) is det.
+%
+%  As build_deserialise_goals/4, but a variable in FreshNames (typed by the
+%  user into this step's form) becomes atom_string(VarName_raw, VarName).
+build_deserialise_goals([], _, _, _, []).
+build_deserialise_goals([VarName | Rest], VN, RawPairs, FreshNames, [Goal | RestGoals]) :-
     ce_find_var(VarName, VN, Var),
     raw_var_name(VarName, RawName),
     ce_find_var(RawName, RawPairs, RawVar),
-    build_deserialise_goals(Rest, VN, RawPairs, RestGoals).
+    (   memberchk(VarName, FreshNames)
+    ->  Goal = atom_string(RawVar, Var)
+    ;   Goal = state_deserialise(RawVar, Var)
+    ),
+    build_deserialise_goals(Rest, VN, RawPairs, FreshNames, RestGoals).
+
+ce_is_fresh(StepName, Fresh, VarName) :-
+    memberchk(StepName-VarName, Fresh).
+
+%% fresh_inputs(+Steps, -Fresh) is det.
+%
+%  Fresh is a list of NextStep-InputVarName pairs: for every form or menu in
+%  every step's response, the field the user types or picks, and the step
+%  the form posts it to.
+fresh_inputs(Steps, Fresh) :-
+    findall(Next-Var,
+            ( member(cont_step(_, _, _, Resp), Steps),
+              ce_resp_input(Resp, Next, Var) ),
+            Fresh0),
+    list_to_set(Fresh0, Fresh).
+
+ce_resp_input(form_resp(_, Var, _, Next, _), Next, Var).
+ce_resp_input(menu_resp(_, Var, _, _, Next, _), Next, Var).
+ce_resp_input(cond_resp(_, Then, Else), Next, Var) :-
+    ( ce_resp_input(Then, Next, Var) ; ce_resp_input(Else, Next, Var) ).
+ce_resp_input(todo_resp(_, Fallback), Next, Var) :-
+    ce_resp_input(Fallback, Next, Var).
+
+%% leading_pre_goals(+NormBody, -PreGoals) is det.
+%
+%  The compute goals (norm_goal/1) at the start of a body, before its first
+%  input or control construct.  Output goals there are prompts and are
+%  skipped.  These run when the landing page is requested (GET), as they
+%  ran before the first prompt in the terminal program.
+leading_pre_goals(norm_conj(First, Rest), Goals) :- !,
+    (   First = norm_goal(_)
+    ->  Goals = [First | More], leading_pre_goals(Rest, More)
+    ;   ( First = norm_output(_) ; First == norm_true )
+    ->  leading_pre_goals(Rest, Goals)
+    ;   Goals = []
+    ).
+leading_pre_goals(_, []).
+
+%% add_landing_pre_goals(+Steps0, +PreGoals, -Steps) is det.
+%
+%  Put PreGoals at the start of the landing-pad step's PreGoals.
+add_landing_pre_goals([cont_step(Name, Recv, Pre0, Resp) | Rest], PreGoals,
+                      [cont_step(Name, Recv, Pre, Resp) | Rest]) :- !,
+    append(PreGoals, Pre0, Pre).
+add_landing_pre_goals(Steps, _, Steps).
 
 %% collect_response_hidden_vars(+Response, -HiddenVarNames) is det.
 %
