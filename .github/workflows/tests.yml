@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SWI-Prolog
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes swi-prolog-nox
+      - name: Run every test file
+        run: |
+          status=0
+          for f in tests/test_*.pl; do
+            echo "::group::$f"
+            if swipl -g "load_test_files([]), run_tests, halt(0)" -t "halt(1)" "$f"; then echo "passed: $f"; else echo "FAILED: $f"; status=1; fi
+            echo "::endgroup::"
+          done
+          exit $status
