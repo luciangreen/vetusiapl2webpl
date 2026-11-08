@@ -584,3 +584,7 @@ acceptance-standard table showing how `examples/auth_example.pl` →
 ## License
 
 BSD 3-Clause — see [`LICENSE`](LICENSE).
+
+## Inputs and outputs
+
+`io/ios.txt` lists 200 inputs and the outputs they give, from real runs of this repo's predicates (which predicates, and how the inputs are made, is in `io/cases.pl`; the inputs are made the same way every time). `swipl io/check_ios.pl` runs them again and fails if any output changed; the "Inputs and outputs" workflow does the same on every push. If a change is meant, run `swipl io/make_ios.pl` and check the diff.
