@@ -10,6 +10,7 @@
     html_writeln/1,
     html_write/1,
     html_br/0,
+    html_format//2,
     % Output helpers — safe (escaped)
     html_safe_writeln/1,
     html_safe_write/1,
@@ -85,6 +86,8 @@
  * @author  Lucian Green
  * @license BSD-3-Clause
  */
+
+:- use_module(library(http/html_write)).
 
 :- use_module(library(lists)).
 :- use_module(library(http/http_parameters)).
@@ -221,6 +224,13 @@ html_safe_write(Text) :-
 % ==========================================================================
 % 5. State (de)serialisation
 % ==========================================================================
+
+%% html_format(+Fmt, +Args)// is det.
+%
+%  format/2 output as raw HTML inside an html//1 term (reply_html_page/2).
+html_format(Fmt, Args) -->
+    { format(atom(A), Fmt, Args) },
+    html(\[A]).
 
 %% state_serialise(+Term, -Atom) is det.
 %

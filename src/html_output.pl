@@ -67,7 +67,7 @@
  *   ?- norm_output_to_html_term(norm_output(writeln('Hi')), T).
  *   T = p('Hi').
  *   ?- norm_output_to_html_term(norm_output(writeln('<b>Hi</b>')), T).
- *   T = \(format('~w~n', ['<b>Hi</b>'])).
+ *   T = \['<b>Hi</b>'].
  *
  * @author  Lucian Green
  * @license BSD-3-Clause
@@ -128,29 +128,31 @@ html_escape(In, Out) :-
 %  reply_html_page/2.
 %
 %  When the argument is a ground atom that looks like HTML (detected by
-%  looks_like_html/1), the content is passed through as raw HTML using the
-%  \(format/2) DCG escape so that SWI's html_write library does not re-escape
-%  the markup.  Otherwise the standard semantic elements (p, span, br) are
+%  looks_like_html/1), the content is passed through as raw HTML using
+%  html_write's \[Atom] raw-token escape, so the markup is not re-escaped.
+%  format/1,2 goals become \html_format(Fmt, Args), a DCG helper emitted
+%  into every generated program (html_write calls \G as a DCG body, so
+%  \format(Fmt, Args) would call the non-existent format/4).  Otherwise the standard semantic elements (p, span, br) are
 %  used, which html_write will escape the content of appropriately.
 norm_output_to_html_term(norm_output(writeln(X)), HtmlTerm) :- !,
     ( atom(X), looks_like_html(X) ->
-        HtmlTerm = \(format('~w~n', [X]))   % HTML fragment — pass through
+        HtmlTerm = \[X]                    % HTML fragment — pass through raw
     ;   HtmlTerm = p(X)                     % plain text or variable
     ).
 norm_output_to_html_term(norm_output(write(X)), HtmlTerm) :- !,
     ( atom(X), looks_like_html(X) ->
-        HtmlTerm = \(format('~w', [X]))     % HTML fragment — pass through
+        HtmlTerm = \[X]                    % HTML fragment — pass through raw
     ;   HtmlTerm = span(X)                  % plain text or variable
     ).
 norm_output_to_html_term(norm_output(nl),   br([])) :- !.
 norm_output_to_html_term(norm_output(print(X)), HtmlTerm) :- !,
     ( atom(X), looks_like_html(X) ->
-        HtmlTerm = \(format('~w~n', [X]))
+        HtmlTerm = \[X]
     ;   HtmlTerm = p(X)
     ).
 norm_output_to_html_term(norm_output(format(Fmt, Args)),
-                         \(format(Fmt, Args))) :- !.
-norm_output_to_html_term(norm_output(format(Fmt)), \(format(Fmt))) :- !.
+                         \html_format(Fmt, Args)) :- !.
+norm_output_to_html_term(norm_output(format(Fmt)), \html_format(Fmt, [])) :- !.
 norm_output_to_html_term(_, p('')).
 
 % ==========================================================================
@@ -205,7 +207,7 @@ norm_output_to_result_call(_, format('<!-- goal -->~n')).
 %  Predicates emitted:
 %    looks_like_html/1, html_escape/2, html_writeln/1, html_write/1,
 %    html_safe_writeln/1, html_safe_write/1, html_page_header/1,
-%    html_page_footer/0.
+%    html_page_footer/0, html_format//2.
 emit_html_helpers(Out) :-
     nl(Out),
     format(Out, "%% --------------------------------------------------~n", []),
@@ -219,7 +221,14 @@ emit_html_helpers(Out) :-
     emit_html_safe_write(Out),
     emit_html_page_header(Out),
     emit_html_page_footer(Out),
+    emit_html_format(Out),
     emit_state_serialiser_helpers(Out).
+
+%  html_format//2: format/2 output as raw HTML inside reply_html_page/2.
+emit_html_format(Out) :-
+    format(Out, "html_format(Fmt, Args) -->~n", []),
+    format(Out, "    { format(atom(A), Fmt, Args) },~n", []),
+    format(Out, "    html(\\[A]).~n~n", []).
 
 emit_looks_like_html(Out) :-
     format(Out, "looks_like_html(X) :-~n", []),

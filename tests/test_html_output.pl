@@ -107,11 +107,11 @@ test(print_becomes_p) :-
 
 test(format2_becomes_escape) :-
     norm_output_to_html_term(norm_output(format("~w~n", [x])),
-                             \(format("~w~n", [x]))).
+                             \html_format("~w~n", [x])).
 
 test(format1_becomes_escape) :-
     norm_output_to_html_term(norm_output(format("hello")),
-                             \(format("hello"))).
+                             \html_format("hello", [])).
 
 test(unknown_becomes_empty_p) :-
     norm_output_to_html_term(norm_output(foo(bar)), p('')).
@@ -126,19 +126,19 @@ test(unknown_becomes_empty_p) :-
 
 test(writeln_html_fragment_passthrough) :-
     norm_output_to_html_term(norm_output(writeln('<h1>Hi</h1>')), HT),
-    HT = \(format('~w~n', ['<h1>Hi</h1>'])).
+    HT = \['<h1>Hi</h1>'].
 
 test(write_html_fragment_passthrough) :-
     norm_output_to_html_term(norm_output(write('<b>bold</b>')), HT),
-    HT = \(format('~w', ['<b>bold</b>'])).
+    HT = \['<b>bold</b>'].
 
 test(print_html_fragment_passthrough) :-
     norm_output_to_html_term(norm_output(print('<em>em</em>')), HT),
-    HT = \(format('~w~n', ['<em>em</em>'])).
+    HT = \['<em>em</em>'].
 
 test(mixed_content_passthrough) :-
     norm_output_to_html_term(norm_output(writeln('Hello <b>World</b>!')), HT),
-    HT = \(format('~w~n', ['Hello <b>World</b>!'])).
+    HT = \['Hello <b>World</b>!'].
 
 :- end_tests(norm_output_to_html_term_html).
 
