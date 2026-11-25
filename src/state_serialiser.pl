@@ -108,19 +108,34 @@ state_deserialise(Atom, Term) :-
 
 %% emit_state_serialiser_helpers(+Out:stream) is det.
 %
-%  Write Prolog source definitions for state_serialise/2 and
-%  state_deserialise/2 into the open output stream Out.  These definitions
-%  are embedded in every generated web program so the program is
-%  self-contained.
+%  Write the generated program's state_serialise/2 and state_deserialise/2.
+%  In the generated web program, state is kept on the server: a hidden
+%  field carries only a random token ("vs_" and 32 hex digits) naming a
+%  value stored in vstate/3, never the value itself.  So a page's source,
+%  the browser's history and caches never hold earlier answers (such as a
+%  password), and a changed hidden field cannot change them: an unknown
+%  token sends the visitor back to the start.  Stored values are dropped
+%  after an hour.  (The module's own predicates above keep term_to_atom/2,
+%  for converting terms in tests and tools.)
 emit_state_serialiser_helpers(Out) :-
     nl(Out),
     format(Out, "%% --------------------------------------------------~n", []),
-    format(Out, "%% State serialisation helpers (Stage 8)~n", []),
+    format(Out, "%% State helpers (Stage 8): values stay on the server; a hidden~n", []),
+    format(Out, "%% field carries only a random token for one, so pages never show~n", []),
+    format(Out, "%% earlier answers and a changed field cannot change them.~n", []),
     format(Out, "%% --------------------------------------------------~n~n", []),
-    format(Out, "state_serialise(Term, Atom) :-~n", []),
-    format(Out, "    term_to_atom(Term, Atom).~n~n", []),
-    format(Out, "state_deserialise(Atom, Term) :-~n", []),
-    format(Out, "    ( catch(term_to_atom(Term, Atom), _, fail) ->~n", []),
-    format(Out, "        true~n", []),
-    format(Out, "    ;   Term = Atom~n", []),
+    format(Out, ":- use_module(library(crypto)).~n", []),
+    format(Out, ":- dynamic vstate/3.~n~n", []),
+    format(Out, "state_serialise(Term, Token) :-~n", []),
+    format(Out, "    crypto_n_random_bytes(16, Bytes),~n", []),
+    format(Out, "    hex_bytes(Hex, Bytes),~n", []),
+    format(Out, "    atom_concat(vs_, Hex, Token),~n", []),
+    format(Out, "    get_time(Now),~n", []),
+    format(Out, "    assertz(vstate(Token, Term, Now)),~n", []),
+    format(Out, "    Old is Now - 3600,~n", []),
+    format(Out, "    forall(( vstate(K, _, T), T < Old ), retractall(vstate(K, _, _))).~n~n", []),
+    format(Out, "state_deserialise(Token, Term) :-~n", []),
+    format(Out, "    (   atom(Token), vstate(Token, T, _)~n", []),
+    format(Out, "    ->  Term = T~n", []),
+    format(Out, "    ;   throw(http_reply(see_other('/')))   % expired or changed: start again~n", []),
     format(Out, "    ).~n~n", []).

@@ -38,8 +38,10 @@ equivalent web program that:
 - Replaces each `read_string/5` call with an **HTML form** that collects the
   same value from the user's browser.
 - Threads all captured variable values forward across HTTP requests using
-  **hidden form fields** and `http_parameters/2`, with no session storage or
-  cookies required.
+  **hidden form fields** and `http_parameters/2`, with no cookies required.
+  The values themselves stay on the server: each hidden field carries only a
+  random token for one, so a page never shows earlier answers (such as a
+  password) and a changed field cannot change them.
 - Converts `writeln/1`, `write/1`, `nl`, and `format/1-2` calls to HTML
   `<p>`/`<span>` elements.
 - Preserves every non-I/O computation predicate verbatim.
@@ -131,13 +133,15 @@ in the next.  The converter implements **form-field threading** to preserve
 state across requests:
 
 1. **Serialisation** — at the end of each intermediate handler, every
-   variable that is *live* in the downstream continuation is serialised to an
-   atom with `state_serialise/2` (implemented via `term_to_atom/2`) and
-   written as an `<input type="hidden">` field in the outgoing HTML form.
+   variable that is *live* in the downstream continuation is stored on the
+   server by `state_serialise/2`, which returns a random token (`vs_` and 32
+   hex digits); the token is written as an `<input type="hidden">` field in
+   the outgoing HTML form.  Stored values are dropped after an hour.
 
 2. **Deserialisation** — at the start of each handler, those hidden fields are
    extracted from the POST body with `http_parameters/2`, then restored to
-   their original Prolog term with `state_deserialise/2`.
+   their original Prolog term with `state_deserialise/2`.  An unknown token
+   (expired, or changed in the page) sends the visitor back to the start.
 
 3. **Liveness analysis** — the converter only serialises variables that
    actually appear free in later steps.  Variables that are no longer needed
@@ -380,7 +384,7 @@ in the generated file and a warning on stderr:
 | `nb_setval/nb_getval`, `b_setval/b_getval` | Global variables are shared across sessions. | Replace with hidden form fields. |
 | `catch/throw` | Interaction with SWI HTTP dispatcher is unverified; uncaught exceptions produce 500 pages. | Wrap in explicit error-handling steps if needed. |
 | `\+(G)` where `G` has side effects | Side effects inside `\+` may be suppressed or not rolled back correctly. | Use pure relational tests inside `\+`. |
-| `!` (cut) | Handlers are deterministic by design; cut has no observable effect. | Remove cuts or replace with if-then-else. |
+| `!` (cut) | Approximately preserved: a cut in straight-line code has no effect in a handler, but a cut inside a branch is kept as written and its escape from other branches cannot be checked (a TODO comment is emitted; see `docs/architecture.md`). | Remove cuts or replace with if-then-else. |
 
 For a complete description of every limitation and the preservation class of
 each construct, see [`docs/limitations.md`](docs/limitations.md).

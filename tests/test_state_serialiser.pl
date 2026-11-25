@@ -262,15 +262,34 @@ test(emits_state_deserialise_definition) :-
                    emit_state_serialiser_helpers(current_output)),
     sub_atom(Out, _, _, _, 'state_deserialise').
 
-test(emits_term_to_atom_call_in_serialise) :-
+test(emits_server_side_store) :-
+    % values stay on the server; a hidden field carries only a token
     with_output_to(atom(Out),
                    emit_state_serialiser_helpers(current_output)),
-    sub_atom(Out, _, _, _, 'term_to_atom').
+    sub_atom(Out, _, _, _, 'assertz(vstate(Token, Term, Now))'),
+    sub_atom(Out, _, _, _, 'crypto_n_random_bytes(16, Bytes)').
 
-test(emits_fallback_in_deserialise) :-
+test(emits_no_value_in_field) :-
+    % the old helper wrote the value itself (term_to_atom) into the field
     with_output_to(atom(Out),
                    emit_state_serialiser_helpers(current_output)),
-    sub_atom(Out, _, _, _, 'catch').
+    \+ sub_atom(Out, _, _, _, 'term_to_atom').
+
+test(emits_restart_on_unknown_token) :-
+    with_output_to(atom(Out),
+                   emit_state_serialiser_helpers(current_output)),
+    sub_atom(Out, _, _, _, 'http_reply(see_other')).
+
+test(emitted_helpers_are_valid_prolog) :-
+    with_output_to(atom(Out),
+                   emit_state_serialiser_helpers(current_output)),
+    term_string(_, "true"),
+    setup_call_cleanup(open_string(Out, S), read_all_terms(S, Ts), close(S)),
+    length(Ts, N), N >= 4.
+
+read_all_terms(S, Ts) :-
+    read_term(S, T, []),
+    (   T == end_of_file -> Ts = [] ; Ts = [T|Rest], read_all_terms(S, Rest) ).
 
 test(emits_non_empty_output) :-
     with_output_to(atom(Out),
